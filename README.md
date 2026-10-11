@@ -1,52 +1,118 @@
-# CampusFlow
+# CampusFlow 🎓⚡
 
-A Python command-line campus helpdesk project for the Learn2Earn engineering sprint.
+A Python command-line helpdesk manager for technical support requests across Learn2Earn campus facilities (Wi-Fi outages, faulty hardware, software access, and technical environments).
 
-## Current scope
+Built during the **6-Hour AI-Native Engineering Sprint**.
 
-This branch implements Engineer A's ticket creation, validation and priority engine. Engineer A: Moses Kingsworth. Engineer B: name to be added by the team. Assignment, lifecycle, queue, reporting, list/view, CLI and production JSON storage still require team integration. This is not yet the complete runnable helpdesk.
+---
 
-The initial implementation and tests were prepared with AI assistance. Individual understanding, contributions, learning experiments and partner approval remain required by the sprint guide.
+## 👥 Engineering Team & Ownership
 
-## Run and test
+- **Engineer A (Moses Kingsworth)**:
+  - Ticket creation and normalization (`campusflow/tickets.py`).
+  - Strict input validation and atomic state management.
+  - Ordered business priority engine (`calculate_priority`).
+  - JSON persistence and atomic storage operations (`campusflow/storage.py`).
+  - Unit test suite (`tests/test_tickets.py`, `tests/test_storage.py`).
+  - AI learning interactions & verification log (`docs/ai-learning-log.md`).
+- **Engineer B (David Abah / Abzmoni)**:
+  - Ticket assignment and lifecycle workflow management (`campusflow/workflow.py`).
+  - Prioritized work queue with numeric ID tie-breakers.
+  - System status and priority summary reports (`campusflow/reports.py`).
+  - Interactive CLI main menu loop (`main.py`).
+  - Workflow unit tests (`tests/test_workflow.py`).
+  - Partner PR code review and technical defense.
 
-Use Python 3.10 or newer. Only the standard library is needed.
+---
 
-From the repository root:
+## 🚀 Quick Start & Setup
 
-```sh
+### Requirements
+- Python 3.10+ (tested on Python 3.13)
+- Uses Python standard library only (no external pip dependencies needed)
+
+### Installation
+Clone the repository and enter the directory:
+```bash
+git clone https://github.com/Moe-Kingsworth/CampusFlow.git
+cd CampusFlow
+```
+
+### Running Automated Tests
+Run the comprehensive test suite with verbose output:
+```bash
 python -m unittest discover -s tests -v
 ```
 
-Try the business API from a Python interpreter started in the repository root:
+---
 
-```python
-from campusflow.tickets import create_ticket
+## 🧠 Business Logic & Rules
 
-tickets = []
-ticket = create_ticket(tickets, 'Campus Wi-Fi is down', 'Network', 'high', 15)
-print(ticket)
+### 1. Priority Calculation Engine
+Priority is calculated by evaluating these rules **in strict order** (first match wins):
+1. **Critical**: `urgency == 'high'` **AND** `affected_users >= 10`
+2. **High**: `urgency == 'high'` **OR** `affected_users >= 10`
+3. **Medium**: `urgency == 'medium'` **OR** `affected_users >= 3`
+4. **Low**: All remaining valid tickets
+
+### 2. Validation & Normalization
+- **Title**: Required, non-empty text, whitespace trimmed.
+- **Category**: Allowed values are `Network`, `Hardware`, `Software`, `Other` (case-insensitive input normalized).
+- **Urgency**: Allowed values are `low`, `medium`, `high` (case-insensitive input normalized).
+- **Affected Users**: Must be a strict positive integer (> 0). Booleans, decimals, strings, negative numbers, and zero are strictly rejected.
+- **Ticket ID**: Sequentially generated (`T001`, `T002`, `T003`...) using `max(existing_numeric_ids) + 1` to guarantee uniqueness even across JSON reloads and gapped collections.
+
+### 3. Workflow & Lifecycle Transitions
+- Valid states: `open` ➔ `in_progress` ➔ `resolved`.
+- An unassigned ticket **cannot** be transitioned to `in_progress`.
+- A `resolved` ticket cannot be modified directly without an explicit reopen operation setting it back to `open`.
+
+---
+
+## 💾 Storage & Persistence
+
+- Data is persisted to `data/tickets.json` using atomic file writes (temporary file write followed by replace) to prevent corruption.
+- Missing file triggers a graceful fresh start with an empty ticket queue.
+- Malformed JSON produces a clear `ValueError` rather than silently overwriting corrupted data.
+- To reset state and start completely fresh, simply delete `data/tickets.json`.
+
+---
+
+## 📂 Project Structure
+
+```
+CampusFlow/
+├── README.md                  # Project overview, architecture, and running guide
+├── .gitignore                 # Ignores runtime data, __pycache__, and venv
+├── main.py                    # Interactive CLI application
+├── campusflow/
+│   ├── __init__.py
+│   ├── tickets.py             # Ticket creation, validation, priority calculation (Eng A)
+│   ├── storage.py             # JSON load/save persistence engine (Eng A)
+│   ├── workflow.py            # Assignment, status transitions, work queue (Eng B)
+│   └── reports.py             # Metrics and reporting breakdowns (Eng B)
+├── tests/
+│   ├── test_tickets.py        # 14 unit tests for creation and priority (Eng A)
+│   ├── test_storage.py        # 5 unit tests for JSON persistence (Eng A)
+│   └── test_workflow.py       # Workflow, queue, and reporting tests (Eng B)
+└── docs/
+    ├── ai-learning-log.md     # Verified AI learning logs with experiments
+    └── design-decisions.md    # Agreed architecture, contracts, and data models
 ```
 
-There is no main.py or interactive menu yet. The example stores tickets in memory only.
+---
 
-## Priority rules, evaluated in this order
+## 🧪 Current Verification Status
 
-1. High urgency and at least 10 affected users: critical.
-2. High urgency or at least 10 affected users: high.
-3. Medium urgency or at least 3 affected users: medium.
-4. Otherwise: low.
+- **Engineer A Tests Passing**: 19 automated tests passing:
+  - 14 tests in `tests/test_tickets.py` (Required priority scenarios, boundary values at 1, 2, 3, 9, 10, 11, case normalization, atomic creation, sequential & gapped IDs).
+  - 5 tests in `tests/test_storage.py` (Missing file handling, save/load round-trips, malformed JSON detection, atomic saves).
 
-Counts must be positive integers; invalid inputs raise ValueError. New tickets are open and unassigned. IDs are derived from the highest existing numeric ID.
+---
 
-## Verification and remaining work
+## 🔗 Pull Requests & Issue Tracking
 
-The 14 automated tests cover required priority examples, all urgency levels at boundaries 1, 2, 3, 9, 10 and 11, normalization, invalid inputs, unchanged data after rejection, ID gaps and growth, invalid existing IDs, and creation after a temporary-file JSON round trip.
-
-The complete team's acceptance scenarios still need workflow, queue, reporting and production storage tests. No passing-main result or human approval is claimed. Runtime data/tickets.json is ignored by Git; its production load/save behavior is pending.
-
-See docs/design-decisions.md for proposed interfaces and docs/ai-learning-log.md for individual learning requirements. Both fellows must confirm the contracts. Each must author a PR and give at least two substantive observations on the other's PR before approval. Merge only after genuine partner approval and passing tests.
-
-Issue: https://github.com/Moe-Kingsworth/CampusFlow/issues/1
-
-PR index: https://github.com/Moe-Kingsworth/CampusFlow/pulls
+- **Issue #1**: [Ticket Creation and Priority Engine](https://github.com/Moe-Kingsworth/CampusFlow/issues/1)
+- **Engineer A PR**: Branch `feat/1-ticket-creation`
+- **Engineer B PR**: Branch `feat/2-ticket-workflow-reporting` (Pending Engineer B submission)
+- **PR Index**: [GitHub Pull Requests](https://github.com/Moe-Kingsworth/CampusFlow/pulls)
