@@ -8,14 +8,14 @@ Built during the **6-Hour Engineering Sprint**.
 
 ## 👥 Engineering Team & Ownership
 
-- **Engineer A (David Abah / Abzmoni)**:
+- **Engineer A (Moses Kingsworth / Moe-Kingsworth)**:
   - Ticket creation and normalization (`campusflow/tickets.py`).
   - Strict input validation and atomic state management.
   - Ordered business priority engine (`calculate_priority`).
   - JSON persistence and atomic storage operations (`campusflow/storage.py`).
   - Unit test suite (`tests/test_tickets.py`, `tests/test_storage.py`).
   - Technical investigation and verification log (`docs/ai-learning-log.md`).
-- **Engineer B (Moses Kingsworth / Moe-Kingsworth)**:
+- **Engineer B (David Abah / Abzmoni)**:
   - Ticket assignment and lifecycle workflow management (`campusflow/workflow.py`).
   - Prioritized work queue with numeric ID tie-breakers.
   - System status and priority summary reports (`campusflow/reports.py`).
@@ -113,6 +113,6 @@ CampusFlow/
 ## 🔗 Pull Requests & Issue Tracking
 
 - **Issue #1**: [Ticket Creation and Priority Engine](https://github.com/Moe-Kingsworth/CampusFlow/issues/1)
-- **Engineer A PR**: Branch `feat/1-ticket-creation` (David Abah)
-- **Engineer B PR**: Branch `feat/2-ticket-workflow-reporting` (Moses Kingsworth)
+- **Engineer A PR**: Branch `feat/1-ticket-creation` (Moses Kingsworth)
+- **Engineer B PR**: Branch `feat/2-ticket-workflow-reporting` (David Abah)
 - **PR Index**: [GitHub Pull Requests](https://github.com/Moe-Kingsworth/CampusFlow/pulls)

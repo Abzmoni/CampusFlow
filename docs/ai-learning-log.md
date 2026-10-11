@@ -4,7 +4,7 @@ This log records verified engineering learning interactions, experiments, and te
 
 ---
 
-## Fellow: Engineer A (David Abah)
+## Fellow: Engineer A (Moses Kingsworth)
 
 ### Interaction #1 — Strict Positive Integer Validation vs. Python Boolean Subclassing
 - **Problem**: Needed to validate that `affected_users` is strictly a positive integer and rejects booleans (`True`, `False`), floats, strings, negative numbers, and zero.
@@ -60,7 +60,7 @@ This log records verified engineering learning interactions, experiments, and te
 
 ---
 
-## Fellow: Engineer B (Moses Kingsworth)
+## Fellow: Engineer B (David Abah)
 
 ### Interaction #1 — <concept/topic>
 - **Problem**: 

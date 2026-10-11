@@ -4,8 +4,8 @@
 
 | Area | Owner | Files |
 |------|-------|-------|
-| **Engineer A (David Abah)** | Ticket creation, validation, priority calculation, JSON persistence | `campusflow/tickets.py`<br>`campusflow/storage.py`<br>`tests/test_tickets.py`<br>`tests/test_storage.py` |
-| **Engineer B (Moses Kingsworth)** | Assignment, lifecycle workflow, work queue, reporting | `campusflow/workflow.py`<br>`campusflow/reports.py`<br>`tests/test_workflow.py` |
+| **Engineer A (Moses Kingsworth)** | Ticket creation, validation, priority calculation, JSON persistence | `campusflow/tickets.py`<br>`campusflow/storage.py`<br>`tests/test_tickets.py`<br>`tests/test_storage.py` |
+| **Engineer B (David Abah)** | Assignment, lifecycle workflow, work queue, reporting | `campusflow/workflow.py`<br>`campusflow/reports.py`<br>`tests/test_workflow.py` |
 | **Shared / Team** | CLI main menu loop, cross-PR reviews, system integration tests, documentation | `main.py`<br>`README.md`<br>`docs/ai-learning-log.md`<br>`docs/design-decisions.md` |
 
 ---
