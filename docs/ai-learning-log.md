@@ -62,35 +62,70 @@ This log records verified engineering learning interactions, experiments, and te
 
 ## Fellow: Engineer B (David Abah)
 
-### Interaction #1 — <concept/topic>
-- **Problem**: 
-- **My initial understanding**: 
-- **Prompt to AI**: 
-- **Useful AI guidance**: 
-- **My independent experiment/test**: 
-- **Verification source or result**: 
-- **Decision**: 
-- **Related file/commit**: 
-- **What I can now explain without AI**: 
+### Interaction #1 — Multi-Key Sorting and Tie-Breaking in Python Lists
+- **Problem**: Needed to sort unresolved tickets in priority order (`critical` > `high` > `medium` > `low`) and break priority ties by earlier numeric ticket ID (e.g. `T001` before `T002`), without mutating the original `tickets` list in place.
+- **My initial understanding**: I initially thought I would need to sort twice sequentially (once by ID and then by priority) or write a custom comparator function.
+- **Prompt to AI**: "How does Python's sorted() function handle multiple sort criteria with custom ranking and numeric tie-breaking? How do I ensure stability and avoid mutating the input list?"
+- **Useful AI guidance**: The advice explained that Python's `sorted()` function takes a `key` callable returning a tuple `(rank_1, rank_2)`. Python compares tuples index by index. By mapping priorities to integer ranks (`{"critical": 0, "high": 1, ...}`) and extracting numeric ID numbers, Python deterministically sorts by priority and breaks ties with IDs in a single pass.
+- **My independent experiment/test**:
+  ```python
+  tickets = [
+      {"id": "T005", "priority": "high"},
+      {"id": "T002", "priority": "high"},
+      {"id": "T001", "priority": "critical"},
+  ]
+  order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+  queue = sorted(tickets, key=lambda t: (order[t["priority"]], int(t["id"][1:])))
+  print([t["id"] for t in queue])  # Output: ['T001', 'T002', 'T005']
+  ```
+- **Verification source or result**: Python documentation on Sorting HOWTO (multi-key sorting with tuples) and passing unittest `test_work_queue_ordering_and_tie_breaking` in `tests/test_workflow.py`.
+- **Decision**: Implemented the tuple key sorting pattern in `get_work_queue` using regex numeric ID extraction, ensuring resolved tickets are excluded and the original collection is not modified.
+- **Related file/commit**: `campusflow/workflow.py` (`get_work_queue`), `tests/test_workflow.py` (`test_work_queue_ordering_and_tie_breaking`).
+- **What I can now explain without AI**: Multi-criteria sorting in Python is elegantly achieved with tuple keys. Returning `(priority_rank, id_number)` guarantees deterministic tie-breaking. `sorted()` returns a new list, preserving immutable caller state.
 
-### Interaction #2 — <concept/topic>
-- **Problem**: 
-- **My initial understanding**: 
-- **Prompt to AI**: 
-- **Useful AI guidance**: 
-- **My independent experiment/test**: 
-- **Verification source or result**: 
-- **Decision**: 
-- **Related file/commit**: 
-- **What I can now explain without AI**: 
+---
 
-### Interaction #3 — <concept/topic> (Critical evaluation/rejection)
-- **Problem**: 
-- **My initial understanding**: 
-- **Prompt to AI**: 
-- **Useful AI guidance**: 
-- **My independent experiment/test**: 
-- **Verification source or result**: 
-- **Decision**: 
-- **Related file/commit**: 
-- **What I can now explain without AI**: 
+### Interaction #2 — State Machine Transitions and Reopen Locks (CRITICALLY EVALUATED & IMPROVED)
+- **Problem**: Needed to enforce ticket lifecycle progression (`open` -> `in_progress` -> `resolved`), prevent moving unassigned tickets to `in_progress`, and enforce that `resolved` tickets cannot be modified without an explicit reopen.
+- **My initial understanding**: I considered using a basic status assignment setter with a check for allowed status strings `if status in ALLOWED_STATUSES`.
+- **Prompt to AI**: "What is the simplest way to update ticket status in a CLI helpdesk? Can I just validate that new_status is in ['open', 'in_progress', 'resolved']?"
+- **Useful AI guidance**: An initial recommendation suggested: "Validating that new_status is in the allowed list and setting ticket['status'] = new_status is simple and avoids complex state machine overhead."
+- **My independent experiment/test**:
+  ```python
+  # Experiment testing permissive setter
+  ticket = {"id": "T001", "status": "open", "assigned_to": None}
+  ticket["status"] = "in_progress"  # Accepted! But violates rule: unassigned cannot be in_progress!
+
+  ticket["status"] = "resolved"
+  ticket["status"] = "in_progress"  # Accepted! But violates rule: resolved cannot be modified directly!
+  ```
+- **Verification source or result**: The experiment proved that a free-form setter violates core sprint rules. Verified with `test_unassigned_ticket_cannot_move_to_in_progress` and `test_resolved_ticket_cannot_move_without_explicit_reopen` in `tests/test_workflow.py`.
+- **Decision**: REJECTED the permissive setter. Implemented explicit guard rules in `update_status`:
+  1. If `new_status == "in_progress"`, ensure `ticket["assigned_to"]` is non-empty; otherwise raise `ValueError`.
+  2. If current status is `"resolved"` and target is not `"open"`, raise `ValueError`.
+  3. Added an explicit `reopen_ticket(tickets, ticket_id)` function that validates existing status is `"resolved"` before reopening.
+- **Related file/commit**: `campusflow/workflow.py` (`update_status`, `reopen_ticket`), `tests/test_workflow.py` (`WorkflowTests`).
+- **What I can now explain without AI**: Business logic state transitions require explicit state-machine guards. A simple allowed-value check is inadequate because it fails to enforce preconditions (assignment before work) and transition locks (closed records requiring explicit reopen).
+
+---
+
+### Interaction #3 — Schema Consistency and Zero-State Handling in Reporting
+- **Problem**: Needed to generate ticket metrics (totals, status breakdowns, priority breakdowns) while handling empty collections (`0` tickets) cleanly without missing keys.
+- **My initial understanding**: I planned to use `collections.Counter` and populate summary keys dynamically as tickets were processed.
+- **Prompt to AI**: "When building a reporting summary dictionary from a list in Python, how should I handle zero counts so keys are always present even when no tickets exist?"
+- **Useful AI guidance**: The advice recommended initializing the summary dictionary with all valid status and priority keys set to `0`. When iterating over records, increment the pre-existing keys.
+- **My independent experiment/test**:
+  ```python
+  report = {
+      "total": 0,
+      "by_status": {"open": 0, "in_progress": 0, "resolved": 0},
+      "by_priority": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+  }
+  # On empty tickets list:
+  print(report["total"])                 # Output: 0
+  print(report["by_status"]["open"])     # Output: 0 (No KeyError!)
+  ```
+- **Verification source or result**: Verified with `test_report_on_empty_tickets` in `tests/test_workflow.py` asserting that all status and priority categories are present with zero counts.
+- **Decision**: Adopted pre-populated dictionary schema in `generate_report`. This guarantees consistent schema output for CLI formatting and downstream consumers.
+- **Related file/commit**: `campusflow/reports.py` (`generate_report`), `tests/test_workflow.py` (`ReportingTests`).
+- **What I can now explain without AI**: Pre-initializing category keys in report dictionaries guarantees schema predictability. It prevents `KeyError` exceptions in UI and consumer layers when groups have zero records.

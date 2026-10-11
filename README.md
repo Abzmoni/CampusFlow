@@ -44,6 +44,21 @@ Run the comprehensive test suite with verbose output:
 python -m unittest discover -s tests -v
 ```
 
+### Running the CLI Helpdesk
+Launch the interactive console menu:
+```bash
+python main.py
+```
+
+Available Menu Options:
+1. **Create Ticket**: Prompts for title, category, urgency, and affected users with priority auto-calculation.
+2. **List / View Tickets**: Lists all tickets and inspects details for any selected ticket ID.
+3. **Assign Ticket**: Assigns an existing ticket to a campus staff member.
+4. **Update Status**: Manages status lifecycle (`open` -> `in_progress` -> `resolved`) or reopens resolved tickets.
+5. **View Work Queue**: Displays open/in-progress tickets ordered by priority and numeric ID tie-breakers.
+6. **Summary Reports**: Displays total counts and status/priority breakdown metrics.
+7. **Exit**: Saves state to `data/tickets.json` and exits.
+
 ---
 
 ## 🧠 Business Logic & Rules
@@ -103,10 +118,17 @@ CampusFlow/
 ---
 
 ## 🧪 Current Verification Status
-
-- **Engineer A Tests Passing**: 19 automated tests passing:
-  - 14 tests in `tests/test_tickets.py` (Required priority scenarios, boundary values at 1, 2, 3, 9, 10, 11, case normalization, atomic creation, sequential & gapped IDs).
+- **Integrated Test Suite**: **35 automated tests passing**:
+  - 14 tests in `tests/test_tickets.py` (Required priority scenarios, boundary values, case normalization, atomic creation, sequential & gapped IDs).
   - 5 tests in `tests/test_storage.py` (Missing file handling, save/load round-trips, malformed JSON detection, atomic saves).
+  - 16 tests in `tests/test_workflow.py` (Assignment, lifecycle progression, resolved ticket reopen locks, priority queue tie-breakers, report aggregations).
+
+---
+
+## ⚠️ Known Limitations & Future Enhancements
+- **Storage Scope**: CampusFlow stores records in a single local JSON document (`data/tickets.json`), suitable for single-instance campus helpdesk operations. A concurrent multi-terminal setup would benefit from a file lock or database backend.
+- **Search & Filtering**: Ticket inspection is currently keyed by ID. Future work could introduce title/description keyword searching.
+- **Ticket Deletion / Archival**: The current specification does not specify ticket deletion. If deletion is implemented, a persisted high-water mark counter will prevent ID reuse.
 
 ---
 
