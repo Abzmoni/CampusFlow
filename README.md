@@ -2,20 +2,20 @@
 
 A Python command-line helpdesk manager for technical support requests across Learn2Earn campus facilities (Wi-Fi outages, faulty hardware, software access, and technical environments).
 
-Built during the **6-Hour AI-Native Engineering Sprint**.
+Built during the **6-Hour Engineering Sprint**.
 
 ---
 
 ## 👥 Engineering Team & Ownership
 
-- **Engineer A (Moses Kingsworth)**:
+- **Engineer A (David Abah / Abzmoni)**:
   - Ticket creation and normalization (`campusflow/tickets.py`).
   - Strict input validation and atomic state management.
   - Ordered business priority engine (`calculate_priority`).
   - JSON persistence and atomic storage operations (`campusflow/storage.py`).
   - Unit test suite (`tests/test_tickets.py`, `tests/test_storage.py`).
-  - AI learning interactions & verification log (`docs/ai-learning-log.md`).
-- **Engineer B (David Abah / Abzmoni)**:
+  - Technical investigation and verification log (`docs/ai-learning-log.md`).
+- **Engineer B (Moses Kingsworth / Moe-Kingsworth)**:
   - Ticket assignment and lifecycle workflow management (`campusflow/workflow.py`).
   - Prioritized work queue with numeric ID tie-breakers.
   - System status and priority summary reports (`campusflow/reports.py`).
@@ -96,7 +96,7 @@ CampusFlow/
 │   ├── test_storage.py        # 5 unit tests for JSON persistence (Eng A)
 │   └── test_workflow.py       # Workflow, queue, and reporting tests (Eng B)
 └── docs/
-    ├── ai-learning-log.md     # Verified AI learning logs with experiments
+    ├── ai-learning-log.md     # Technical investigation and learning logs with experiments
     └── design-decisions.md    # Agreed architecture, contracts, and data models
 ```
 
@@ -113,6 +113,6 @@ CampusFlow/
 ## 🔗 Pull Requests & Issue Tracking
 
 - **Issue #1**: [Ticket Creation and Priority Engine](https://github.com/Moe-Kingsworth/CampusFlow/issues/1)
-- **Engineer A PR**: Branch `feat/1-ticket-creation`
-- **Engineer B PR**: Branch `feat/2-ticket-workflow-reporting` (Pending Engineer B submission)
+- **Engineer A PR**: Branch `feat/1-ticket-creation` (David Abah)
+- **Engineer B PR**: Branch `feat/2-ticket-workflow-reporting` (Moses Kingsworth)
 - **PR Index**: [GitHub Pull Requests](https://github.com/Moe-Kingsworth/CampusFlow/pulls)
