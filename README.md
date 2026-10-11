@@ -1,4 +1,4 @@
-# CampusFlow 🎓⚡
+# CampusFlow
 
 A Python command-line helpdesk manager for technical support requests across Learn2Earn campus facilities (Wi-Fi outages, faulty hardware, software access, and technical environments).
 
@@ -6,7 +6,7 @@ Built during the **6-Hour Engineering Sprint**.
 
 ---
 
-## 👥 Engineering Team & Ownership
+## Engineering Team & Ownership
 
 - **Engineer A (Moses Kingsworth / Moe-Kingsworth)**:
   - Ticket creation and normalization (`campusflow/tickets.py`).
@@ -25,7 +25,7 @@ Built during the **6-Hour Engineering Sprint**.
 
 ---
 
-## 🚀 Quick Start & Setup
+## Quick Start & Setup
 
 ### Requirements
 - Python 3.10+ (tested on Python 3.13)
@@ -61,7 +61,7 @@ Available Menu Options:
 
 ---
 
-## 🧠 Business Logic & Rules
+## Business Logic & Rules
 
 ### 1. Priority Calculation Engine
 Priority is calculated by evaluating these rules **in strict order** (first match wins):
@@ -78,13 +78,13 @@ Priority is calculated by evaluating these rules **in strict order** (first matc
 - **Ticket ID**: Sequentially generated (`T001`, `T002`, `T003`...) using `max(existing_numeric_ids) + 1` to guarantee uniqueness even across JSON reloads and gapped collections.
 
 ### 3. Workflow & Lifecycle Transitions
-- Valid states: `open` ➔ `in_progress` ➔ `resolved`.
+- Valid states: `open` -> `in_progress` -> `resolved`.
 - An unassigned ticket **cannot** be transitioned to `in_progress`.
 - A `resolved` ticket cannot be modified directly without an explicit reopen operation setting it back to `open`.
 
 ---
 
-## 💾 Storage & Persistence
+## Storage & Persistence
 
 - Data is persisted to `data/tickets.json` using atomic file writes (temporary file write followed by replace) to prevent corruption.
 - Missing file triggers a graceful fresh start with an empty ticket queue.
@@ -93,7 +93,7 @@ Priority is calculated by evaluating these rules **in strict order** (first matc
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 CampusFlow/
@@ -117,7 +117,7 @@ CampusFlow/
 
 ---
 
-## 🧪 Current Verification Status
+## Current Verification Status
 - **Integrated Test Suite**: **35 automated tests passing**:
   - 14 tests in `tests/test_tickets.py` (Required priority scenarios, boundary values, case normalization, atomic creation, sequential & gapped IDs).
   - 5 tests in `tests/test_storage.py` (Missing file handling, save/load round-trips, malformed JSON detection, atomic saves).
@@ -125,14 +125,14 @@ CampusFlow/
 
 ---
 
-## ⚠️ Known Limitations & Future Enhancements
+## Known Limitations & Future Enhancements
 - **Storage Scope**: CampusFlow stores records in a single local JSON document (`data/tickets.json`), suitable for single-instance campus helpdesk operations. A concurrent multi-terminal setup would benefit from a file lock or database backend.
 - **Search & Filtering**: Ticket inspection is currently keyed by ID. Future work could introduce title/description keyword searching.
 - **Ticket Deletion / Archival**: The current specification does not specify ticket deletion. If deletion is implemented, a persisted high-water mark counter will prevent ID reuse.
 
 ---
 
-## 🔗 Pull Requests & Issue Tracking
+## Pull Requests & Issue Tracking
 
 - **Issue #1**: [Ticket Creation and Priority Engine](https://github.com/Moe-Kingsworth/CampusFlow/issues/1)
 - **Engineer A PR**: Branch `feat/1-ticket-creation` (Moses Kingsworth)
