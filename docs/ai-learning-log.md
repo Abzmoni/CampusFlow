@@ -1,131 +1,110 @@
-# Engineering Learning Log — CampusFlow
+# Engineering Learning Log — CampusFlow Pro
 
-This log records verified engineering learning interactions, experiments, and technical decisions following the six-hour sprint guide.
+This log records verified engineering learning interactions, experiments, and technical decisions following the CampusFlow Pro engineering challenge.
 
 ---
 
-## Fellow: Engineer A (Moses Kingsworth)
+## Fellow: Engineer A (David Abah / Abzmoni)
 
-### Interaction #1 — Strict Positive Integer Validation vs. Python Boolean Subclassing
-- **Problem**: Needed to validate that `affected_users` is strictly a positive integer and rejects booleans (`True`, `False`), floats, strings, negative numbers, and zero.
-- **My initial understanding**: I assumed `isinstance(count, int) and count > 0` was sufficient to guarantee a valid user count.
-- **Prompt to AI**: "In Python, how do I validate that an input is strictly a positive integer and not a float, string, or boolean? Does isinstance(val, int) reject True?"
-- **Useful AI guidance**: The guidance explained that in Python, `bool` is a direct subclass of `int` (`issubclass(bool, int) is True`). Consequently, `isinstance(True, int)` evaluates to `True`, and since `int(True) == 1`, `True > 0` evaluates to `True`! The advice suggested checking `type(val) is int and val > 0`.
+### Interaction #1 — Timezone-Aware UTC Datetimes, ISO-8601 Serialization, and Clock Injection
+- **Problem**: Needed to implement robust time handling for SLA calculations and overdue detection without introducing flaky, non-deterministic tests or timezone bugs.
+- **My initial understanding**: I initially considered calling `datetime.now()` directly inside `calculate_due_at()` and `is_overdue()`, and using `time.sleep()` in unit tests to test overdue transitions.
+- **Prompt to AI**: "Why does calling datetime.now() everywhere make unit tests unreliable, and how does dependency injection of a clock parameter solve this in Python? How should timezone-aware UTC datetimes and ISO-8601 strings be formatted and compared?"
+- **Useful AI guidance**: The AI explained that calling `datetime.now()` directly creates non-deterministic tests that depend on system clock speed, latency, and wall-clock execution time. Furthermore, comparing naive datetimes with aware datetimes raises `TypeError`. The AI suggested designing every time-dependent function to accept an optional `now=None` argument (defaulting to `datetime.now(timezone.utc)` when omitted), and serializing to standard ISO-8601 strings.
 - **My independent experiment/test**:
   ```python
-  # Small isolated experiment
-  print(isinstance(True, int))   # Output: True
-  print(True > 0)                # Output: True
-  print(type(True) is int)       # Output: False
-  print(type(15) is int)         # Output: True
+  from datetime import datetime, timezone, timedelta
+  # Experiment comparing naive and aware datetimes:
+  naive = datetime.now()
+  aware = datetime.now(timezone.utc)
+  try:
+      _ = naive > aware
+  except TypeError as e:
+      print("Caught expected TypeError:", e)
+
+  # Experiment simulating time deterministically with clock injection:
+  t0 = datetime(2026, 10, 14, 10, 0, 0, tzinfo=timezone.utc)
+  due = t0 + timedelta(minutes=60)
+  print("At 60m exact (overdue?):", (t0 + timedelta(minutes=60)) > due)   # False
+  print("At 61m past (overdue?):", (t0 + timedelta(minutes=61)) > due)    # True
   ```
-- **Verification source or result**: Python official language documentation (PEP 285 — "A Boolean Type", where `bool` inherits from `int`) and passing unittest `test_rejects_invalid_counts` in `tests/test_tickets.py`.
-- **Decision**: Improved the validation logic from `isinstance(value, int)` to `type(value) is not int or value <= 0`. This rejects booleans cleanly and prevents invalid counts from entering the system.
-- **Related file/commit**: `campusflow/tickets.py` (`_affected_users`), `tests/test_tickets.py` (`test_rejects_invalid_counts`).
-- **What I can now explain without AI**: In Python, `bool` inherits from `int`. `isinstance(True, int)` is `True`. To enforce strict integer validation without accepting booleans, we must check exact type with `type(val) is int`.
+- **Verification source or result**: Python documentation on `datetime.timezone` and passing test cases `test_checkpoint_a1_critical_at_exact_60_minutes_is_not_overdue` and `test_checkpoint_a2_critical_at_61_minutes_is_overdue` in `tests/test_sla.py`.
+- **Decision**: Implemented `get_now(now=None)`, `to_iso_utc(dt)`, and `from_iso_utc(ts)` in `campusflow/sla.py`. All SLA functions accept `now=None`, enabling 100% deterministic, instant testing of boundaries without sleeping.
+- **Related file/commit**: `campusflow/sla.py`, `tests/test_sla.py` (`feat/11-sla-engine`).
+- **What I can now explain without AI**: Wall-clock calls inside business logic couple code to physical time, making boundary testing impossible without sleeping. Injecting an optional clock parameter (`now=None`) preserves ergonomic production calls while allowing tests to simulate arbitrary time instants with millisecond precision.
 
 ---
 
-### Interaction #2 — Safe Sequential ID Generation vs. `len(tickets) + 1` (CRITICALLY EVALUATED & REJECTED)
-- **Problem**: Needed to generate unique sequential ticket IDs (`T001`, `T002`, `T003`) without using a global mutable variable, and ensuring uniqueness even after JSON reload or if IDs contain gaps.
-- **My initial understanding**: I thought we could simply use `f"T{len(tickets) + 1:03d}"` or maintain a module-level counter variable.
-- **Prompt to AI**: "What is the best way to generate auto-incrementing IDs like T001 for tickets stored in a list of dicts in Python? Can I just use len(tickets) + 1?"
-- **Useful AI guidance**: The initial suggestion was: "If records are never deleted, using `f'T{len(tickets) + 1:03d}'` is the easiest and cleanest way to generate sequential IDs. Alternatively, keep a counter variable in the module."
+### Interaction #2 — SLA Escalation Idempotency & Per-Cycle Markers (CRITICALLY EVALUATED & REJECTED)
+- **Problem**: Needed to design an escalation mechanism that evaluates overdue tickets, creates exactly ONE escalation event in a given SLA cycle, and does not create duplicate events when rerun, while still allowing legitimate escalations if a ticket is resolved and reopened into a new cycle.
+- **My initial understanding**: I thought we could check the global `events` list: if an event with `event_type == "ESCALATE"` and matching `ticket_id` exists anywhere in history, do not escalate.
+- **Prompt to AI**: "How do I ensure an escalation function is idempotent so calling it multiple times does not produce duplicate events? Can I just check if an ESCALATE event exists for the ticket in the events list?"
+- **Useful AI guidance**: The AI initially suggested: "Yes, you can simply scan `events` for `event['ticket_id'] == ticket_id and event['event_type'] == 'ESCALATE'`. If found, skip escalation."
 - **My independent experiment/test**:
   ```python
-  # Simulated gapped / reloaded ticket collection
-  tickets = [{"id": "T001"}, {"id": "T003"}]
-  suggested_id = f"T{len(tickets) + 1:03d}"  # Evaluates to "T003" -> DUPLICATE ID COLLISION!
-  max_num = max(int(t["id"][1:]) for t in tickets)
-  safe_id = f"T{max_num + 1:03d}"           # Evaluates to "T004" -> SAFE & UNIQUE
+  # Testing the AI's global event check against the reopen requirement:
+  events = [{"ticket_id": "T001", "event_type": "ESCALATE", "details": "Escalated in cycle 1"}]
+  # Ticket is later resolved and reopened into cycle 2, becoming overdue again:
+  ticket = {"id": "T001", "status": "open", "due_at": "2026-10-14T15:00:00Z"}
+  # AI's global check:
+  has_escalated_ai = any(e["ticket_id"] == "T001" and e["event_type"] == "ESCALATE" for e in events)
+  print("AI check permits cycle 2 escalation?", not has_escalated_ai) # False! LEGITIMATE ESCALATION BLOCKED!
   ```
-- **Verification source or result**: The experiment clearly demonstrated that `len(tickets) + 1` produces ID collisions whenever a list has non-contiguous IDs. Verified with `test_uses_numeric_max_for_unordered_gapped_ids` in `tests/test_tickets.py`.
-- **Decision**: REJECTED the recommendation to use `len(tickets) + 1` or global counters. Implemented `_next_ticket_id(tickets)` using regex ID validation and `max(numbers, default=0) + 1`. This safely handles gapped IDs, ensures ID uniqueness after JSON reloads, and scales past 999 (`T1000`).
-- **Related file/commit**: `campusflow/tickets.py` (`_next_ticket_id`), `tests/test_tickets.py` (`test_uses_numeric_max_for_unordered_gapped_ids`, `test_grows_beyond_three_digits`).
-- **What I can now explain without AI**: Deriving IDs from collection length (`len + 1`) is fragile because any filtering, deletion, or non-sequential reload creates duplicate IDs. Finding the maximum existing numeric ID ensures deterministic, unique IDs without relying on fragile global state.
+- **Verification source or result**: The experiment proved that the AI's global event scan breaks Section 3's requirement: *"If a ticket is reopened and becomes overdue in its new cycle, it may legitimately escalate again."* Verified with `test_checkpoint_a4_reopen_starts_fresh_sla_cycle_and_clears_escalation` in `tests/test_sla.py`.
+- **Decision**: REJECTED the AI's recommendation to use a global event scan. Instead, implemented a per-cycle marker `escalation_cycle` directly on the ticket record:
+  1. `escalation_cycle = 0` on ticket creation.
+  2. Escalation checks `if ticket.get("escalation_cycle", 0) == 0`. When escalated, sets `escalation_cycle = 1` and appends an event. Subsequent runs see `escalation_cycle == 1` and skip (idempotent).
+  3. When a ticket is reopened via `reopen_ticket()`, it resets `escalation_cycle = 0` ("clears per-cycle escalation flag"). If the ticket breaches SLA in the new cycle, it escalates once more legitimately.
+- **Related file/commit**: `campusflow/sla.py` (`escalate_overdue`), `campusflow/workflow.py` (`reopen_ticket`), `tests/test_sla.py`.
+- **What I can now explain without AI**: Idempotency cannot be implemented as a global blanket check when business entities have discrete lifecycles. A stateful per-cycle marker scoped to the active SLA window guarantees idempotency within the active cycle without preventing future valid operations in subsequent cycles.
 
 ---
 
-### Interaction #3 — Atomic Operations and Exception Safety
-- **Problem**: Needed to guarantee that if ticket creation encounters invalid data (blank title, negative users, invalid category), the shared tickets list is left completely untouched.
-- **My initial understanding**: I considered appending a skeleton dictionary to `tickets` first and validating fields step by step, removing it if an error occurred.
-- **Prompt to AI**: "When appending records to a shared list in Python, should I validate all fields upfront before appending, or append and remove if an error occurs?"
-- **Useful AI guidance**: The advice introduced the concept of atomicity: validating all inputs into local variables before mutating any shared data structure ensures that an exception aborts the operation cleanly without leaving half-constructed records.
+### Interaction #3 — Defensive Version-2 JSON Schema Validation & Atomic File Replacement
+- **Problem**: Needed to upgrade JSON storage to schema version 2 (`schema_version: 2`, `tickets: [...]`, `events: [...]`) while guaranteeing that loading corrupt data never overwrites or clears valid in-memory state, and crashes during save never corrupt storage.
+- **My initial understanding**: I considered reading the file and directly replacing the in-memory lists, relying on `except Exception: pass`.
+- **Prompt to AI**: "What are the common pitfalls when migrating JSON persistence to a versioned schema with multiple collections? How can atomic writes and schema pre-validation prevent data loss?"
+- **Useful AI guidance**: The AI outlined the risks of in-place mutation: if a file has valid JSON syntax but invalid schema (e.g. missing required fields), partially updating in-memory structures leaves the application in an undefined state. The AI recommended validating the entire data structure into fresh local lists before returning, and writing to disk using a temporary file with `os.replace`.
 - **My independent experiment/test**:
-  Wrote `test_invalid_creation_leaves_existing_records_unchanged` in `tests/test_tickets.py` testing 18 invalid input variations against a snapshot `before = copy.deepcopy(self.tickets)`.
-- **Verification source or result**: Unittest assertion `self.assertEqual(self.tickets, before)` passes across all invalid input scenarios.
-- **Decision**: Accepted the upfront validation recommendation. Structured `create_ticket` so all validations (`_text`, `_urgency`, `calculate_priority`, `_next_ticket_id`) occur BEFORE `tickets.append(ticket)`.
-- **Related file/commit**: `campusflow/tickets.py` (`create_ticket`), `tests/test_tickets.py` (`test_invalid_creation_leaves_existing_records_unchanged`).
-- **What I can now explain without AI**: Business logic functions should adhere to atomic execution: validate all inputs and perform computations in local variables first; only commit changes to shared collections once all validation checks succeed.
+  Wrote `tests/test_storage_v2.py` testing invalid schema versions, missing ticket fields, malformed JSON, and atomic `.tmp` replacement. Verified that an invalid file raises `ValueError` while leaving the caller's existing ticket collection completely intact.
+- **Verification source or result**: Unittest execution in `tests/test_storage_v2.py` passing across all corruption and schema-violation scenarios.
+- **Decision**: Implemented `load_data(filepath)` and `save_data(data, filepath)` in `campusflow/storage.py` with strict schema validation and atomic temporary-file replacement.
+- **Related file/commit**: `campusflow/storage.py`, `tests/test_storage_v2.py` (`feat/12-data-integrity`).
+- **What I can now explain without AI**: Defensive persistence requires validating both syntax and semantic schema before touching runtime state. Saving must be atomic via temporary file swap so that interruptions or out-of-disk errors leave the original database document undamaged.
 
 ---
 
-## Fellow: Engineer B (David Abah)
+## Fellow: Engineer B (Mohammed)
 
-### Interaction #1 — Multi-Key Sorting and Tie-Breaking in Python Lists
-- **Problem**: Needed to sort unresolved tickets in priority order (`critical` > `high` > `medium` > `low`) and break priority ties by earlier numeric ticket ID (e.g. `T001` before `T002`), without mutating the original `tickets` list in place.
-- **My initial understanding**: I initially thought I would need to sort twice sequentially (once by ID and then by priority) or write a custom comparator function.
-- **Prompt to AI**: "How does Python's sorted() function handle multiple sort criteria with custom ranking and numeric tie-breaking? How do I ensure stability and avoid mutating the input list?"
-- **Useful AI guidance**: The advice explained that Python's `sorted()` function takes a `key` callable returning a tuple `(rank_1, rank_2)`. Python compares tuples index by index. By mapping priorities to integer ranks (`{"critical": 0, "high": 1, ...}`) and extracting numeric ID numbers, Python deterministically sorts by priority and breaks ties with IDs in a single pass.
-- **My independent experiment/test**:
-  ```python
-  tickets = [
-      {"id": "T005", "priority": "high"},
-      {"id": "T002", "priority": "high"},
-      {"id": "T001", "priority": "critical"},
-  ]
-  order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-  queue = sorted(tickets, key=lambda t: (order[t["priority"]], int(t["id"][1:])))
-  print([t["id"] for t in queue])  # Output: ['T001', 'T002', 'T005']
-  ```
-- **Verification source or result**: Python documentation on Sorting HOWTO (multi-key sorting with tuples) and passing unittest `test_work_queue_ordering_and_tie_breaking` in `tests/test_workflow.py`.
-- **Decision**: Implemented the tuple key sorting pattern in `get_work_queue` using regex numeric ID extraction, ensuring resolved tickets are excluded and the original collection is not modified.
-- **Related file/commit**: `campusflow/workflow.py` (`get_work_queue`), `tests/test_workflow.py` (`test_work_queue_ordering_and_tie_breaking`).
-- **What I can now explain without AI**: Multi-criteria sorting in Python is elegantly achieved with tuple keys. Returning `(priority_rank, id_number)` guarantees deterministic tie-breaking. `sorted()` returns a new list, preserving immutable caller state.
+### Interaction #1 — <concept/topic>
+- **Problem**: 
+- **My initial understanding**: 
+- **Prompt to AI**: 
+- **Useful AI guidance**: 
+- **My independent experiment/test**: 
+- **Verification source or result**: 
+- **Decision**: 
+- **Related file/commit**: 
+- **What I can now explain without AI**: 
 
----
+### Interaction #2 — <concept/topic>
+- **Problem**: 
+- **My initial understanding**: 
+- **Prompt to AI**: 
+- **Useful AI guidance**: 
+- **My independent experiment/test**: 
+- **Verification source or result**: 
+- **Decision**: 
+- **Related file/commit**: 
+- **What I can now explain without AI**: 
 
-### Interaction #2 — State Machine Transitions and Reopen Locks (CRITICALLY EVALUATED & IMPROVED)
-- **Problem**: Needed to enforce ticket lifecycle progression (`open` -> `in_progress` -> `resolved`), prevent moving unassigned tickets to `in_progress`, and enforce that `resolved` tickets cannot be modified without an explicit reopen.
-- **My initial understanding**: I considered using a basic status assignment setter with a check for allowed status strings `if status in ALLOWED_STATUSES`.
-- **Prompt to AI**: "What is the simplest way to update ticket status in a CLI helpdesk? Can I just validate that new_status is in ['open', 'in_progress', 'resolved']?"
-- **Useful AI guidance**: An initial recommendation suggested: "Validating that new_status is in the allowed list and setting ticket['status'] = new_status is simple and avoids complex state machine overhead."
-- **My independent experiment/test**:
-  ```python
-  # Experiment testing permissive setter
-  ticket = {"id": "T001", "status": "open", "assigned_to": None}
-  ticket["status"] = "in_progress"  # Accepted! But violates rule: unassigned cannot be in_progress!
-
-  ticket["status"] = "resolved"
-  ticket["status"] = "in_progress"  # Accepted! But violates rule: resolved cannot be modified directly!
-  ```
-- **Verification source or result**: The experiment proved that a free-form setter violates core sprint rules. Verified with `test_unassigned_ticket_cannot_move_to_in_progress` and `test_resolved_ticket_cannot_move_without_explicit_reopen` in `tests/test_workflow.py`.
-- **Decision**: REJECTED the permissive setter. Implemented explicit guard rules in `update_status`:
-  1. If `new_status == "in_progress"`, ensure `ticket["assigned_to"]` is non-empty; otherwise raise `ValueError`.
-  2. If current status is `"resolved"` and target is not `"open"`, raise `ValueError`.
-  3. Added an explicit `reopen_ticket(tickets, ticket_id)` function that validates existing status is `"resolved"` before reopening.
-- **Related file/commit**: `campusflow/workflow.py` (`update_status`, `reopen_ticket`), `tests/test_workflow.py` (`WorkflowTests`).
-- **What I can now explain without AI**: Business logic state transitions require explicit state-machine guards. A simple allowed-value check is inadequate because it fails to enforce preconditions (assignment before work) and transition locks (closed records requiring explicit reopen).
-
----
-
-### Interaction #3 — Schema Consistency and Zero-State Handling in Reporting
-- **Problem**: Needed to generate ticket metrics (totals, status breakdowns, priority breakdowns) while handling empty collections (`0` tickets) cleanly without missing keys.
-- **My initial understanding**: I planned to use `collections.Counter` and populate summary keys dynamically as tickets were processed.
-- **Prompt to AI**: "When building a reporting summary dictionary from a list in Python, how should I handle zero counts so keys are always present even when no tickets exist?"
-- **Useful AI guidance**: The advice recommended initializing the summary dictionary with all valid status and priority keys set to `0`. When iterating over records, increment the pre-existing keys.
-- **My independent experiment/test**:
-  ```python
-  report = {
-      "total": 0,
-      "by_status": {"open": 0, "in_progress": 0, "resolved": 0},
-      "by_priority": {"critical": 0, "high": 0, "medium": 0, "low": 0},
-  }
-  # On empty tickets list:
-  print(report["total"])                 # Output: 0
-  print(report["by_status"]["open"])     # Output: 0 (No KeyError!)
-  ```
-- **Verification source or result**: Verified with `test_report_on_empty_tickets` in `tests/test_workflow.py` asserting that all status and priority categories are present with zero counts.
-- **Decision**: Adopted pre-populated dictionary schema in `generate_report`. This guarantees consistent schema output for CLI formatting and downstream consumers.
-- **Related file/commit**: `campusflow/reports.py` (`generate_report`), `tests/test_workflow.py` (`ReportingTests`).
-- **What I can now explain without AI**: Pre-initializing category keys in report dictionaries guarantees schema predictability. It prevents `KeyError` exceptions in UI and consumer layers when groups have zero records.
+### Interaction #3 — <concept/topic>
+- **Problem**: 
+- **My initial understanding**: 
+- **Prompt to AI**: 
+- **Useful AI guidance**: 
+- **My independent experiment/test**: 
+- **Verification source or result**: 
+- **Decision**: 
+- **Related file/commit**: 
+- **What I can now explain without AI**: 
