@@ -54,11 +54,18 @@ class CreationTests(unittest.TestCase):
 
     def test_complete_record_and_return_value(self):
         ticket = self.create()
-        self.assertEqual(ticket, {
-            'id': 'T001', 'title': 'Wi-Fi is down', 'category': 'Network',
-            'urgency': 'high', 'affected_users': 15, 'priority': 'critical',
-            'status': 'open', 'assigned_to': None,
-        })
+        self.assertEqual(ticket['id'], 'T001')
+        self.assertEqual(ticket['title'], 'Wi-Fi is down')
+        self.assertEqual(ticket['category'], 'Network')
+        self.assertEqual(ticket['urgency'], 'high')
+        self.assertEqual(ticket['affected_users'], 15)
+        self.assertEqual(ticket['priority'], 'critical')
+        self.assertEqual(ticket['status'], 'open')
+        self.assertIsNone(ticket['assigned_to'])
+        self.assertIn('created_at', ticket)
+        self.assertEqual(ticket['updated_at'], ticket['created_at'])
+        self.assertIn('due_at', ticket)
+        self.assertEqual(ticket['escalation_cycle'], 0)
         self.assertEqual(len(self.tickets), 1)
         self.assertIs(ticket, self.tickets[0])
 
