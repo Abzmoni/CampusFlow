@@ -1,6 +1,7 @@
 """Engineer B's ticket workflow, assignment, and work queue management."""
 
 import re
+from campusflow.sla import calculate_due_at, get_now, to_iso_utc
 
 ALLOWED_STATUSES = ("open", "in_progress", "resolved")
 PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -19,25 +20,29 @@ def find_ticket(tickets, ticket_id):
     raise ValueError(f"Ticket '{ticket_id}' not found.")
 
 
-def assign_ticket(tickets, ticket_id, staff_name):
+def assign_ticket(tickets, ticket_id, staff_name, now=None):
     """Assign a ticket to a staff member.
 
     Validates that staff_name is non-empty text and ticket_id exists.
+    Updates updated_at timestamp.
     """
     if not isinstance(staff_name, str) or not staff_name.strip():
         raise ValueError("Staff member name must be non-empty text.")
     ticket = find_ticket(tickets, ticket_id)
     ticket["assigned_to"] = staff_name.strip()
+    if "updated_at" in ticket or now is not None:
+        ticket["updated_at"] = to_iso_utc(get_now(now))
     return ticket
 
 
-def update_status(tickets, ticket_id, new_status):
+def update_status(tickets, ticket_id, new_status, now=None):
     """Transition ticket to a new status obeying lifecycle rules.
 
     Rules:
     1. Allowed statuses: open, in_progress, resolved.
     2. Unassigned ticket cannot be moved to in_progress.
     3. A resolved ticket cannot be modified directly unless explicitly reopened to open.
+    Updates updated_at timestamp.
     """
     if not isinstance(new_status, str) or not new_status.strip():
         raise ValueError("Status must be non-empty text.")
@@ -57,15 +62,36 @@ def update_status(tickets, ticket_id, new_status):
             raise ValueError("Cannot move unassigned ticket to in_progress. Assign a staff member first.")
 
     ticket["status"] = target_status
+    if "updated_at" in ticket or now is not None:
+        ticket["updated_at"] = to_iso_utc(get_now(now))
     return ticket
 
 
-def reopen_ticket(tickets, ticket_id):
-    """Explicitly reopen a resolved ticket by setting its status back to open."""
+def reopen_ticket(tickets, ticket_id, now=None):
+    """Explicitly reopen a resolved ticket by setting its status back to open.
+
+    Starts a NEW SLA cycle at the reopening timestamp:
+      - keeps original created_at
+      - sets status = 'open'
+      - updates updated_at = reopen_time
+      - updates due_at = calculate_due_at(priority, reopen_time)
+      - clears per-cycle escalation flag: escalation_cycle = 0
+    """
     ticket = find_ticket(tickets, ticket_id)
     if ticket.get("status") != "resolved":
         raise ValueError(f"Ticket '{ticket.get('id')}' is not resolved (current status: '{ticket.get('status')}').")
+
     ticket["status"] = "open"
+    now_dt = get_now(now)
+    now_iso = to_iso_utc(now_dt)
+    ticket["updated_at"] = now_iso
+
+    # Recalculate due_at for the new SLA cycle if ticket has priority
+    if "priority" in ticket:
+        ticket["due_at"] = calculate_due_at(ticket["priority"], now_dt)
+
+    # Clear per-cycle escalation flag for new cycle
+    ticket["escalation_cycle"] = 0
     return ticket
 
 
