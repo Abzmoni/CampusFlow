@@ -1,7 +1,7 @@
-"""Engineer A's ticket creation and priority rules, independent of CLI and disk IO."""
+"""Engineer A's ticket creation, SLA initialization, and priority rules."""
 
 import re
-
+from campusflow.sla import calculate_due_at, get_now, to_iso_utc
 
 CATEGORIES = ("Network", "Hardware", "Software", "Other")
 URGENCIES = ("low", "medium", "high")
@@ -53,12 +53,13 @@ def _next_ticket_id(tickets):
     return f"T{max(numbers, default=0) + 1:03d}"
 
 
-def create_ticket(tickets, title, category, urgency, affected_users):
+def create_ticket(tickets, title, category, urgency, affected_users, now=None):
     """Append and return a validated ticket; leave the list unchanged on error.
 
-    ``tickets`` is the shared list of ticket dictionaries. Counts must already
-    be integers: the CLI is responsible for parsing input strings. IDs are
-    derived from existing records, so loading JSON requires no global counter.
+    In CampusFlow Pro, each ticket records:
+      - id, title, category, urgency, affected_users, priority, status, assigned_to
+      - created_at, updated_at, due_at (ISO-8601 UTC strings)
+      - escalation_cycle (integer, initially 0)
     """
     if not isinstance(tickets, list):
         raise ValueError("Tickets must be a list.")
@@ -68,6 +69,11 @@ def create_ticket(tickets, title, category, urgency, affected_users):
         raise ValueError("Category must be Network, Hardware, Software or Other.")
     urgency = _urgency(urgency)
     priority = calculate_priority(urgency, affected_users)
+
+    now_dt = get_now(now)
+    now_iso = to_iso_utc(now_dt)
+    due_at_iso = calculate_due_at(priority, now_dt)
+
     ticket = {
         "id": _next_ticket_id(tickets),
         "title": title,
@@ -77,6 +83,10 @@ def create_ticket(tickets, title, category, urgency, affected_users):
         "priority": priority,
         "status": "open",
         "assigned_to": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "due_at": due_at_iso,
+        "escalation_cycle": 0,
     }
     tickets.append(ticket)
     return ticket

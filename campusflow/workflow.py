@@ -1,6 +1,7 @@
 """Engineer B's ticket workflow, assignment, and work queue management."""
 
 import re
+from campusflow.sla import calculate_due_at, get_now, to_iso_utc
 
 
 # Allowed ticket statuses
@@ -44,7 +45,7 @@ def find_ticket(tickets, ticket_id):
 
 
 # Assign a staff member to a ticket
-def assign_ticket(tickets, ticket_id, staff_name):
+def assign_ticket(tickets, ticket_id, staff_name, now=None):
 
     # Validate staff name
     if not isinstance(staff_name, str) or not staff_name.strip():
@@ -62,11 +63,14 @@ def assign_ticket(tickets, ticket_id, staff_name):
     # Assign staff member
     ticket["assigned_to"] = staff_name.strip()
 
+    if "updated_at" in ticket or now is not None:
+        ticket["updated_at"] = to_iso_utc(get_now(now))
+
     return ticket
 
 
 # Change a ticket's status
-def update_status(tickets, ticket_id, new_status):
+def update_status(tickets, ticket_id, new_status, now=None):
 
     # Define valid status transitions
     allowed_transitions = {
@@ -121,11 +125,14 @@ def update_status(tickets, ticket_id, new_status):
     # Update ticket status
     ticket["status"] = target_status
 
+    if "updated_at" in ticket or now is not None:
+        ticket["updated_at"] = to_iso_utc(get_now(now))
+
     return ticket
 
 
 # Reopen a resolved ticket
-def reopen_ticket(tickets, ticket_id):
+def reopen_ticket(tickets, ticket_id, now=None):
 
     # Find the ticket
     ticket = find_ticket(tickets, ticket_id)
@@ -139,6 +146,14 @@ def reopen_ticket(tickets, ticket_id):
 
     # Reopen the ticket
     ticket["status"] = "open"
+
+    now_dt = get_now(now)
+    ticket["updated_at"] = to_iso_utc(now_dt)
+
+    if "priority" in ticket:
+        ticket["due_at"] = calculate_due_at(ticket["priority"], now_dt)
+
+    ticket["escalation_cycle"] = 0
 
     return ticket
 
