@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from campusflow.audited_workflow import (
     assign_with_history,
+    reopen_with_history,
     update_status_with_history
 )
 
@@ -237,6 +238,46 @@ class TestAuditedWorkflow(unittest.TestCase):
         self.assertEqual(self.tickets, original_tickets)
         self.assertEqual(self.events, original_events)
 
+    # Test 9: Successful reopen records REOPEN event and starts new cycle
+    def test_successful_reopen_records_event(self):
+        # Progress ticket to resolved first
+        assign_with_history(self.tickets, self.events, "T001", "John", "Admin", self.now)
+        update_status_with_history(self.tickets, self.events, "T001", "in_progress", "John", self.now)
+        update_status_with_history(self.tickets, self.events, "T001", "resolved", "John", self.now)
+
+        reopened = reopen_with_history(
+            self.tickets,
+            self.events,
+            "T001",
+            "Supervisor",
+            self.now
+        )
+
+        self.assertEqual(reopened["status"], "open")
+        self.assertEqual(len(self.events), 4)
+        reopen_evt = self.events[3]
+        self.assertEqual(reopen_evt["event_type"], "REOPEN")
+        self.assertEqual(reopen_evt["actor"], "Supervisor")
+        self.assertEqual(reopen_evt["before_status"], "resolved")
+        self.assertEqual(reopen_evt["after_status"], "open")
+
+    # Test 10: Reopening an unresolved ticket fails without side effects
+    def test_reopen_unresolved_ticket_fails_without_side_effects(self):
+        original_tickets = deepcopy(self.tickets)
+        original_events = deepcopy(self.events)
+
+        with self.assertRaises(ValueError):
+            reopen_with_history(
+                self.tickets,
+                self.events,
+                "T001",
+                "Supervisor",
+                self.now
+            )
+
+        self.assertEqual(self.tickets, original_tickets)
+        self.assertEqual(self.events, original_events)
+
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main()

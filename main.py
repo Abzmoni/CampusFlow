@@ -1,22 +1,20 @@
-"""CampusFlow — Command-Line Campus Helpdesk Application."""
+"""CampusFlow Pro — Command-Line Campus Helpdesk Application."""
 
 import sys
 
-from campusflow.reports import generate_report
-from campusflow.storage import load_tickets, save_tickets
-from campusflow.tickets import create_ticket
-
-from campusflow.workflow import (
-    assign_ticket,
-    find_ticket,
-    get_work_queue,
-    reopen_ticket,
-    update_status,
+from campusflow.audited_workflow import (
+    assign_with_history,
+    reopen_with_history,
+    update_status_with_history,
 )
-
-# Import the Engineering Knowledge Lab
+from campusflow.cli_actions import confirm_duplicate_warning, create_with_history
+from campusflow.history import get_ticket_history
 from campusflow.knowledge_lab import run_knowledge_lab
-
+from campusflow.reports import generate_enhanced_report
+from campusflow.sla import escalate_overdue
+from campusflow.sla_queue import get_sla_attention_queue
+from campusflow.storage import load_data, save_data
+from campusflow.workflow import find_ticket, get_work_queue
 
 STORAGE_PATH = "data/tickets.json"
 
@@ -32,12 +30,23 @@ def print_header(title):
 
 
 # --------------------------------------------------
+# PERSISTENCE HELPER
+# --------------------------------------------------
+
+def persist_state(tickets, events, filepath=STORAGE_PATH):
+    """Save tickets and events atomically under Version-2 schema."""
+    save_data(
+        {"schema_version": 2, "tickets": tickets, "events": events},
+        filepath,
+    )
+
+
+# --------------------------------------------------
 # FORMAT TICKET INFORMATION
 # --------------------------------------------------
 
 def format_ticket_row(t):
     assigned = t.get("assigned_to") or "Unassigned"
-
     return (
         f"[{t.get('id')}] {t.get('title'):<30} | "
         f"{t.get('category'):<8} | "
@@ -48,11 +57,10 @@ def format_ticket_row(t):
 
 
 # --------------------------------------------------
-# CREATE TICKET
+# CREATE TICKET (WITH DUPLICATE GUARD & AUDIT)
 # --------------------------------------------------
 
-def handle_create(tickets):
-
+def handle_create(tickets, events):
     print_header("CREATE A NEW TICKET")
 
     title = input("Enter ticket title: ").strip()
@@ -63,42 +71,39 @@ def handle_create(tickets):
     print("Urgency levels: low, medium, high")
     urgency = input("Enter urgency: ").strip()
 
-    affected_raw = input(
-        "Enter number of affected users: "
-    ).strip()
+    affected_raw = input("Enter number of affected users: ").strip()
 
     try:
         affected_users = int(affected_raw)
-
     except ValueError:
-        print(
-            "\n[Error] Affected users must be "
-            "a valid positive integer."
-        )
+        print("\n[Error] Affected users must be a valid positive integer.")
         return
 
+    actor = input("Enter operator/actor label (default: operator): ").strip() or "operator"
+
     try:
-        ticket = create_ticket(
+        ticket = create_with_history(
             tickets,
+            events,
             title,
             category,
             urgency,
-            affected_users
+            affected_users,
+            actor=actor,
+            confirm_duplicates=confirm_duplicate_warning,
         )
 
-        save_tickets(tickets, STORAGE_PATH)
+        if ticket is None:
+            print("\n[Notice] Ticket creation was cancelled.")
+            return
 
-        print(
-            f"\n[Success] Ticket {ticket['id']} "
-            "created successfully!"
-        )
+        persist_state(tickets, events)
 
-        print(
-            f"  Priority calculated: "
-            f"{ticket['priority'].upper()}"
-        )
-
+        print(f"\n[Success] Ticket {ticket['id']} created successfully!")
+        print(f"  Priority calculated: {ticket['priority'].upper()}")
         print(f"  Status: {ticket['status']}")
+        if "due_at" in ticket:
+            print(f"  Due At: {ticket['due_at']}")
 
     except ValueError as err:
         print(f"\n[Error] Failed to create ticket: {err}")
@@ -109,7 +114,6 @@ def handle_create(tickets):
 # --------------------------------------------------
 
 def handle_list_view(tickets):
-
     print_header("ALL TICKETS")
 
     if not tickets:
@@ -119,40 +123,27 @@ def handle_list_view(tickets):
     for ticket in tickets:
         print(format_ticket_row(ticket))
 
-    choice = input(
-        "\nEnter Ticket ID to view details "
-        "(or press Enter to return): "
-    ).strip()
+    choice = input("\nEnter Ticket ID to view details (or press Enter to return): ").strip()
 
     if choice:
-
         try:
             ticket = find_ticket(tickets, choice)
 
             print("\n" + "-" * 40)
-
-            print(f"Ticket ID:      {ticket.get('id')}")
-            print(f"Title:          {ticket.get('title')}")
-            print(f"Category:       {ticket.get('category')}")
-            print(f"Urgency:        {ticket.get('urgency')}")
-
-            print(
-                f"Affected Users: "
-                f"{ticket.get('affected_users')}"
-            )
-
-            print(
-                f"Priority:       "
-                f"{ticket.get('priority').upper()}"
-            )
-
-            print(f"Status:         {ticket.get('status')}")
-
-            print(
-                f"Assigned To:    "
-                f"{ticket.get('assigned_to') or 'Unassigned'}"
-            )
-
+            print(f"Ticket ID:        {ticket.get('id')}")
+            print(f"Title:            {ticket.get('title')}")
+            print(f"Category:         {ticket.get('category')}")
+            print(f"Urgency:          {ticket.get('urgency')}")
+            print(f"Affected Users:   {ticket.get('affected_users')}")
+            print(f"Priority:         {ticket.get('priority').upper()}")
+            print(f"Status:           {ticket.get('status')}")
+            print(f"Assigned To:      {ticket.get('assigned_to') or 'Unassigned'}")
+            if "created_at" in ticket:
+                print(f"Created At:       {ticket.get('created_at')}")
+            if "due_at" in ticket:
+                print(f"Due At:           {ticket.get('due_at')}")
+            if "escalation_cycle" in ticket:
+                print(f"Escalated (SLA):  {'Yes' if ticket.get('escalation_cycle') == 1 else 'No'}")
             print("-" * 40)
 
         except ValueError as err:
@@ -160,29 +151,26 @@ def handle_list_view(tickets):
 
 
 # --------------------------------------------------
-# ASSIGN TICKET
+# ASSIGN TICKET (AUDITED)
 # --------------------------------------------------
 
-def handle_assign(tickets):
-
+def handle_assign(tickets, events):
     print_header("ASSIGN TICKET")
 
-    ticket_id = input(
-        "Enter Ticket ID to assign (e.g. T001): "
-    ).strip()
-
-    staff_name = input(
-        "Enter staff member name: "
-    ).strip()
+    ticket_id = input("Enter Ticket ID to assign (e.g. T001): ").strip()
+    staff_name = input("Enter staff member name: ").strip()
+    actor = input("Enter operator/actor label (default: operator): ").strip() or "operator"
 
     try:
-        updated = assign_ticket(
+        updated = assign_with_history(
             tickets,
+            events,
             ticket_id,
-            staff_name
+            staff_name,
+            actor=actor,
         )
 
-        save_tickets(tickets, STORAGE_PATH)
+        persist_state(tickets, events)
 
         print(
             f"\n[Success] Ticket {updated['id']} "
@@ -194,50 +182,33 @@ def handle_assign(tickets):
 
 
 # --------------------------------------------------
-# UPDATE TICKET WORKFLOW
+# UPDATE TICKET WORKFLOW (AUDITED)
 # --------------------------------------------------
 
-def handle_workflow(tickets):
-
+def handle_workflow(tickets, events):
     print_header("UPDATE TICKET STATUS / WORKFLOW")
 
-    print(
-        "1. Progress / Update Status "
-        "(open -> in_progress -> resolved)"
-    )
+    print("1. Progress / Update Status (open -> in_progress -> resolved)")
+    print("2. Reopen a Resolved Ticket (resolved -> open)")
 
-    print(
-        "2. Reopen a Resolved Ticket "
-        "(resolved -> open)"
-    )
-
-    choice = input(
-        "Select an option (1-2): "
-    ).strip()
+    choice = input("Select an option (1-2): ").strip()
 
     if choice == "1":
-
-        ticket_id = input(
-            "Enter Ticket ID: "
-        ).strip()
-
-        print(
-            "Target status options: "
-            "open, in_progress, resolved"
-        )
-
-        new_status = input(
-            "Enter new status: "
-        ).strip()
+        ticket_id = input("Enter Ticket ID: ").strip()
+        print("Target status options: open, in_progress, resolved")
+        new_status = input("Enter new status: ").strip()
+        actor = input("Enter operator/actor label (default: operator): ").strip() or "operator"
 
         try:
-            updated = update_status(
+            updated = update_status_with_history(
                 tickets,
+                events,
                 ticket_id,
-                new_status
+                new_status,
+                actor=actor,
             )
 
-            save_tickets(tickets, STORAGE_PATH)
+            persist_state(tickets, events)
 
             print(
                 f"\n[Success] Ticket {updated['id']} "
@@ -245,28 +216,28 @@ def handle_workflow(tickets):
             )
 
         except ValueError as err:
-            print(
-                f"\n[Error] Transition rejected: {err}"
-            )
+            print(f"\n[Error] Transition rejected: {err}")
 
     elif choice == "2":
-
-        ticket_id = input(
-            "Enter Ticket ID to reopen: "
-        ).strip()
+        ticket_id = input("Enter Ticket ID to reopen: ").strip()
+        actor = input("Enter operator/actor label (default: operator): ").strip() or "operator"
 
         try:
-            updated = reopen_ticket(
+            updated = reopen_with_history(
                 tickets,
-                ticket_id
+                events,
+                ticket_id,
+                actor=actor,
             )
 
-            save_tickets(tickets, STORAGE_PATH)
+            persist_state(tickets, events)
 
             print(
                 f"\n[Success] Ticket {updated['id']} "
-                "reopened and set back to 'open'."
+                "reopened and set back to 'open' with a fresh SLA cycle!"
             )
+            if "due_at" in updated:
+                print(f"  New SLA Due At: {updated['due_at']}")
 
         except ValueError as err:
             print(f"\n[Error] Reopen failed: {err}")
@@ -276,34 +247,22 @@ def handle_workflow(tickets):
 
 
 # --------------------------------------------------
-# VIEW PRIORITIZED WORK QUEUE
+# VIEW PRIORITIZED WORK QUEUE (ORIGINAL)
 # --------------------------------------------------
 
 def handle_work_queue(tickets):
-
-    print_header("PRIORITIZED WORK QUEUE")
+    print_header("PRIORITIZED WORK QUEUE (OPEN TICKETS)")
 
     queue = get_work_queue(tickets)
 
     if not queue:
-        print(
-            "Work queue is empty. "
-            "No unresolved tickets."
-        )
+        print("Work queue is empty. No unresolved tickets.")
         return
 
-    print(
-        "Open & In-Progress Tickets "
-        "(Ordered: Critical -> High -> Medium -> Low, "
-        "ID tie-breaker):\n"
-    )
+    print("Open & In-Progress Tickets (Ordered: Critical -> High -> Medium -> Low, ID tie-breaker):\n")
 
     for pos, ticket in enumerate(queue, start=1):
-
-        assigned = (
-            ticket.get("assigned_to") or "Unassigned"
-        )
-
+        assigned = ticket.get("assigned_to") or "Unassigned"
         print(
             f"#{pos:<2} [{ticket.get('id')}] "
             f"Priority: {ticket.get('priority').upper():<8} | "
@@ -314,34 +273,127 @@ def handle_work_queue(tickets):
 
 
 # --------------------------------------------------
-# VIEW SUMMARY REPORTS
+# VIEW SLA ATTENTION QUEUE (PRO)
+# --------------------------------------------------
+
+def handle_sla_queue(tickets):
+    print_header("SLA ATTENTION QUEUE (TIME-CRITICAL)")
+
+    try:
+        attention = get_sla_attention_queue(tickets)
+    except ValueError as err:
+        print(f"\n[Error] Could not load SLA queue: {err}")
+        return
+
+    if not attention:
+        print("SLA queue is empty. No unresolved tickets.")
+        return
+
+    print("Unresolved Tickets (Overdue first, then earliest deadline, then ID):\n")
+
+    for pos, ticket in enumerate(attention, start=1):
+        assigned = ticket.get("assigned_to") or "Unassigned"
+        due = ticket.get("due_at") or "No deadline"
+        overdue_badge = "[OVERDUE]" if ticket.get("overdue") or (
+            ticket.get("escalation_cycle", 0) == 1
+        ) else "        "
+
+        print(
+            f"#{pos:<2} {overdue_badge} [{ticket.get('id')}] "
+            f"Due: {due:<25} | "
+            f"Priority: {ticket.get('priority').upper():<8} | "
+            f"Status: {ticket.get('status'):<11} | "
+            f"{ticket.get('title')} ({assigned})"
+        )
+
+
+# --------------------------------------------------
+# CHECK AND ESCALATE OVERDUE TICKETS (PRO)
+# --------------------------------------------------
+
+def handle_escalate(tickets, events):
+    print_header("CHECK AND ESCALATE OVERDUE TICKETS")
+
+    actor = input("Enter operator label (default: system): ").strip() or "system"
+
+    try:
+        result = escalate_overdue(tickets, events, actor=actor)
+
+        if result["newly_escalated"] > 0:
+            persist_state(tickets, events)
+
+        print("\nSLA Escalation Results:")
+        print(f"  - Newly escalated tickets:    {result['newly_escalated']}")
+        print(f"  - Already escalated tickets:  {result['already_escalated']}")
+
+        if result["newly_escalated"] == 0 and result["already_escalated"] == 0:
+            print("  - No tickets currently breach their SLA deadlines.")
+
+    except ValueError as err:
+        print(f"\n[Error] Escalation failed: {err}")
+
+
+# --------------------------------------------------
+# VIEW TICKET AUDIT HISTORY (PRO)
+# --------------------------------------------------
+
+def handle_history(events):
+    print_header("VIEW TICKET AUDIT HISTORY")
+
+    ticket_id = input("Enter Ticket ID to view audit history (e.g. T001): ").strip()
+    if not ticket_id:
+        print("\n[Error] Ticket ID cannot be empty.")
+        return
+
+    try:
+        history = get_ticket_history(events, ticket_id)
+        if not history:
+            print(f"\nNo audit history recorded for Ticket '{ticket_id.upper()}'.")
+            return
+
+        print(f"\nAudit History for {ticket_id.upper()} ({len(history)} events):\n")
+        print(f"{'Event ID':<10} {'Timestamp':<28} {'Event':<10} {'Actor':<12} {'Transition':<24} {'Details'}")
+        print("-" * 100)
+
+        for event in history:
+            b_stat = event.get("before_status") or "-"
+            a_stat = event.get("after_status") or "-"
+            trans = f"{b_stat} -> {a_stat}"
+            print(
+                f"{event.get('event_id'):<10} "
+                f"{event.get('timestamp'):<28} "
+                f"{event.get('event_type'):<10} "
+                f"{event.get('actor'):<12} "
+                f"{trans:<24} "
+                f"{event.get('details')}"
+            )
+
+    except ValueError as err:
+        print(f"\n[Error] Could not retrieve history: {err}")
+
+
+# --------------------------------------------------
+# VIEW ENHANCED SUMMARY REPORTS (PRO)
 # --------------------------------------------------
 
 def handle_reports(tickets):
+    print_header("CAMPUSFLOW SUMMARY REPORT (ENHANCED)")
 
-    print_header("HELPDESK SUMMARY REPORT")
-
-    report = generate_report(tickets)
+    report = generate_enhanced_report(tickets)
 
     print(f"Total Tickets: {report['total']}\n")
 
     print("Breakdown by Status:")
-
     for status, count in report["by_status"].items():
-
-        print(
-            f"  - {status.replace('_', ' ').title():<15}: "
-            f"{count}"
-        )
+        print(f"  - {status.replace('_', ' ').title():<15}: {count}")
 
     print("\nBreakdown by Priority:")
-
     for priority, count in report["by_priority"].items():
+        print(f"  - {priority.title():<15}: {count}")
 
-        print(
-            f"  - {priority.title():<15}: "
-            f"{count}"
-        )
+    print("\nSLA Performance Metrics:")
+    print(f"  - Overdue Unresolved Tickets:         {report.get('overdue', 0)}")
+    print(f"  - Escalated in Current SLA Cycle:     {report.get('escalated_this_cycle', 0)}")
 
 
 # --------------------------------------------------
@@ -349,32 +401,12 @@ def handle_reports(tickets):
 # --------------------------------------------------
 
 def handle_knowledge_lab():
-
     print_header("ENGINEERING KNOWLEDGE LAB")
-
-    print(
-        "Welcome to the CampusFlow Pro "
-        "Engineering Knowledge Lab."
-    )
-
-    print(
-        "\nYou will answer 10 multiple-choice "
-        "engineering questions."
-    )
-
-    print(
-        "You must also provide explanations "
-        "for at least three answers."
-    )
-
-    print(
-        "\nYour quiz results will be saved "
-        "separately from helpdesk tickets."
-    )
-
+    print("Welcome to the CampusFlow Pro Engineering Knowledge Lab.")
+    print("You will answer 10 multiple-choice engineering questions.")
+    print("You must also provide explanations for at least three answers.")
+    print("Your quiz results will be saved separately from helpdesk tickets.")
     print("\nStarting quiz...\n")
-
-    # Launch the interactive Knowledge Lab
     run_knowledge_lab()
 
 
@@ -383,98 +415,62 @@ def handle_knowledge_lab():
 # --------------------------------------------------
 
 def main():
-
-    # Load existing helpdesk tickets
+    # Load Version 2 data structure
     try:
-        tickets = load_tickets(STORAGE_PATH)
-
+        data = load_data(STORAGE_PATH)
+        tickets = data["tickets"]
+        events = data["events"]
     except ValueError as err:
-
         print(f"\n[FATAL ERROR] {err}")
-
-        print(
-            "Please resolve the file conflict "
-            "or inspect data/tickets.json "
-            "before restarting."
-        )
-
+        print("Please resolve the file conflict or inspect data/tickets.json before restarting.")
         sys.exit(1)
 
-    # Keep displaying the menu until the user exits
     while True:
-
         print("\n" + "=" * 60)
-        print("              CAMPUSFLOW HELP DESK MANAGER")
+        print("              CAMPUSFLOW PRO HELP DESK MANAGER")
+        print("=" * 60)
+        print(" 1. Create Ticket (with Duplicate Warning)")
+        print(" 2. List / View Tickets")
+        print(" 3. Assign Ticket to Staff")
+        print(" 4. Update Ticket Workflow Status (Progress / Reopen)")
+        print(" 5. View Prioritized Work Queue (Original)")
+        print(" 6. View SLA Attention Queue (Pro)")
+        print(" 7. Check and Escalate Overdue Tickets (Pro)")
+        print(" 8. View Ticket Audit History (Pro)")
+        print(" 9. View Summary Reports (Enhanced SLA Analytics)")
+        print("10. Engineering Knowledge Lab")
+        print("11. Exit")
         print("=" * 60)
 
-        print("1. Create Ticket")
-        print("2. List / View Tickets")
-        print("3. Assign Ticket to Staff")
-        print("4. Update Ticket Workflow Status")
-        print("5. View Prioritized Work Queue")
-        print("6. View Summary Reports")
-        print("7. Exit")
+        choice = input("Enter your choice (1-11): ").strip()
 
-        # NEW FEATURE
-        print("8. Engineering Knowledge Lab")
-
-        print("=" * 60)
-
-        choice = input(
-            "Enter your choice (1-8): "
-        ).strip()
-
-        # Create ticket
         if choice == "1":
-            handle_create(tickets)
-
-        # List and view tickets
+            handle_create(tickets, events)
         elif choice == "2":
             handle_list_view(tickets)
-
-        # Assign ticket
         elif choice == "3":
-            handle_assign(tickets)
-
-        # Update workflow
+            handle_assign(tickets, events)
         elif choice == "4":
-            handle_workflow(tickets)
-
-        # View work queue
+            handle_workflow(tickets, events)
         elif choice == "5":
             handle_work_queue(tickets)
-
-        # View reports
         elif choice == "6":
-            handle_reports(tickets)
-
-        # Exit application
+            handle_sla_queue(tickets)
         elif choice == "7":
-
-            save_tickets(tickets, STORAGE_PATH)
-
-            print(
-                "\nExiting CampusFlow. "
-                "Tickets safely saved to storage. Goodbye!"
-            )
-
-            break
-
-        # NEW: Launch Engineering Knowledge Lab
+            handle_escalate(tickets, events)
         elif choice == "8":
+            handle_history(events)
+        elif choice == "9":
+            handle_reports(tickets)
+        elif choice == "10":
             handle_knowledge_lab()
-
-        # Invalid menu selection
+        elif choice == "11":
+            persist_state(tickets, events)
+            print("\nExiting CampusFlow Pro. Tickets and audit history safely saved. Goodbye!")
+            break
         else:
-            print(
-                "\n[Error] Invalid choice. "
-                "Please enter a number between 1 and 8."
-            )
+            print("\n[Error] Invalid choice. Please enter a number between 1 and 11.")
 
-
-# --------------------------------------------------
-# START THE APPLICATION
-# --------------------------------------------------
 
 if __name__ == "__main__":
     main()

@@ -74,37 +74,49 @@ This log records verified engineering learning interactions, experiments, and te
 
 ---
 
-## Fellow: Engineer B (Mohammed)
+## Fellow: Engineer B (Mohammed / midi2154)
 
-### Interaction #1 — <concept/topic>
-- **Problem**: 
-- **My initial understanding**: 
-- **Prompt to AI**: 
-- **Useful AI guidance**: 
-- **My independent experiment/test**: 
-- **Verification source or result**: 
-- **Decision**: 
-- **Related file/commit**: 
-- **What I can now explain without AI**: 
+### Interaction #1 — String Normalization and Duplicate Ticket Detection
+- **Problem**: Needed to detect duplicate support tickets without producing false negatives due to minor whitespace or letter case variations, while ensuring legitimate duplicate reports are warned about rather than automatically deleted or blocked.
+- **My initial understanding**: I thought about using basic string equality (`ticket["title"] == new_title`) or substring matching.
+- **Prompt to AI**: "What is the standard way in Python to normalize user-entered strings for duplicate detection across categories, and how should warnings be handled without blocking user choice?"
+- **Useful AI guidance**: The AI explained that `str.casefold()` provides aggressive, unicode-safe lowercase matching, and `str.split()` without arguments collapses all consecutive whitespace characters. Combining them into `" ".join(title.casefold().split())` produces a canonical title representation. The AI also advised checking only unresolved tickets (`status != 'resolved'`) and prompting the user for confirmation rather than throwing an unrecoverable exception.
+- **My independent experiment/test**:
+  ```python
+  def norm(s): return " ".join(s.casefold().split())
+  t1 = "  Campus   Wi-Fi Down "
+  t2 = "campus wi-fi down"
+  print("Normalized match:", norm(t1) == norm(t2))  # True
+  ```
+- **Verification source or result**: Passing unit tests in `tests/test_duplicates.py` verifying whitespace stripping, casefolding, category isolation, and ignoring resolved tickets.
+- **Decision**: Implemented `normalize_title` and `detect_duplicates` in `campusflow/duplicates.py` and interactive confirmation in `campusflow/cli_actions.py`.
+- **Related file/commit**: `campusflow/duplicates.py`, `campusflow/cli_actions.py`, `tests/test_duplicates.py`.
+- **What I can now explain without AI**: User input contains irregular spacing and capitalization. Canonical normalization maps diverse input strings into an equivalence class. Critical operational systems must warn operators with matching context rather than silently dropping repeat incidents.
 
-### Interaction #2 — <concept/topic>
-- **Problem**: 
-- **My initial understanding**: 
-- **Prompt to AI**: 
-- **Useful AI guidance**: 
-- **My independent experiment/test**: 
-- **Verification source or result**: 
-- **Decision**: 
-- **Related file/commit**: 
-- **What I can now explain without AI**: 
+---
 
-### Interaction #3 — <concept/topic>
-- **Problem**: 
-- **My initial understanding**: 
-- **Prompt to AI**: 
-- **Useful AI guidance**: 
-- **My independent experiment/test**: 
-- **Verification source or result**: 
-- **Decision**: 
-- **Related file/commit**: 
-- **What I can now explain without AI**: 
+### Interaction #2 — Append-Only Audit Logging and Failure Atomicity
+- **Problem**: Needed to record state changes (`CREATE`, `ASSIGN`, `START`, `RESOLVE`, `REOPEN`, `ESCALATE`) in an append-only event stream while guaranteeing that rejected operations never leave orphaned audit events or partially updated tickets.
+- **My initial understanding**: I considered updating the ticket dictionary in place and then appending an event dictionary to the events list.
+- **Prompt to AI**: "How do I ensure transactional failure atomicity between two in-memory collections (tickets and audit events) in Python without an external database?"
+- **Useful AI guidance**: The AI suggested using the snapshot/rollback pattern or preparing changes on `deepcopy` copies of both lists. If any validation fails, the copied structures are discarded, leaving the original in-memory state undamaged. Once all operations succeed, slice assignment (`tickets[:] = tickets_copy`) commits both changes simultaneously.
+- **My independent experiment/test**:
+  Tested attempting an invalid transition on a ticket and checking `len(events)` before and after to ensure `len(events)` remains completely unchanged.
+- **Verification source or result**: Passing unit tests in `tests/test_audited_workflow.py` asserting that invalid operations raise `ValueError` and leave original collections unmodified.
+- **Decision**: Implemented `assign_with_history`, `update_status_with_history`, and `reopen_with_history` in `campusflow/audited_workflow.py` using `deepcopy` staging.
+- **Related file/commit**: `campusflow/history.py`, `campusflow/audited_workflow.py`, `tests/test_audited_workflow.py`.
+- **What I can now explain without AI**: Audit logs must be append-only and strictly truthful. An event represents a successful business fact. Operations must stage mutations defensively so that validation errors abort cleanly without emitting fake or orphaned audit records.
+
+---
+
+### Interaction #3 — Data Isolation and Atomic Persistence in the Engineering Knowledge Lab
+- **Problem**: Needed to implement an interactive 10-question Knowledge Lab quiz that saves session records (score, participant, choices, explanations, revision topics) without mixing quiz data into helpdesk ticket storage.
+- **My initial understanding**: I considered storing quiz responses inside an extra field in `tickets.json`.
+- **Prompt to AI**: "What are best practices for isolating auxiliary educational/testing data from core operational database files in a CLI tool?"
+- **Useful AI guidance**: The AI recommended domain isolation: keep quiz sessions in a separate file (`data/quiz_sessions.json`). It emphasized that auxiliary data must still adhere to atomic write principles (`tempfile.NamedTemporaryFile` + `os.replace`) and defensive JSON loading to prevent corruption.
+- **My independent experiment/test**:
+  Wrote `test_save_session_append_and_separate_file` and `test_corrupt_quiz_file_is_not_overwritten` in `tests/test_knowledge_lab.py` verifying that quiz persistence never touches ticket data and gracefully handles corrupted quiz files.
+- **Verification source or result**: Passing unit tests in `tests/test_knowledge_lab.py`.
+- **Decision**: Implemented `build_session`, `save_session`, and `run_knowledge_lab` in `campusflow/knowledge_lab.py` persisting to `data/quiz_sessions.json`.
+- **Related file/commit**: `campusflow/knowledge_lab.py`, `tests/test_knowledge_lab.py`.
+- **What I can now explain without AI**: Auxiliary domains must be stored in separate persistence streams to prevent schema coupling and blast radius propagation. Atomic file writing and defensive corrupt-file preservation must be applied consistently across all data stores.
