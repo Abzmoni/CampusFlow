@@ -5,6 +5,7 @@ from copy import deepcopy
 from campusflow.workflow import (
     assign_ticket,
     find_ticket,
+    reopen_ticket,
     update_status,
 )
 
@@ -35,7 +36,8 @@ def assign_with_history(
     ticket = assign_ticket(
         tickets_copy,
         ticket_id,
-        staff_name
+        staff_name,
+        now=now
     )
 
     # Record the successful assignment
@@ -87,7 +89,8 @@ def update_status_with_history(
     updated_ticket = update_status(
         tickets_copy,
         ticket_id,
-        new_status
+        new_status,
+        now=now
     )
 
     # Get the new status
@@ -112,6 +115,52 @@ def update_status_with_history(
         before_status,
         after_status,
         f"Status changed from {before_status} to {after_status}",
+        now=now
+    )
+
+    # Apply changes only when both operations succeed
+    tickets[:] = tickets_copy
+    events[:] = events_copy
+
+    return find_ticket(tickets, ticket_id)
+
+
+# Reopen a resolved ticket and record its history
+def reopen_with_history(
+    tickets,
+    events,
+    ticket_id,
+    actor,
+    now=None
+):
+    """Reopen a resolved ticket, resetting SLA cycle and logging a REOPEN event."""
+    # Validate collections
+    if not isinstance(tickets, list):
+        raise ValueError("Tickets must be a list")
+
+    if not isinstance(events, list):
+        raise ValueError("Events must be a list")
+
+    # Create independent copies
+    tickets_copy = deepcopy(tickets)
+    events_copy = deepcopy(events)
+
+    # Reopen on copied data (starts new SLA cycle, resets escalation_cycle)
+    ticket = reopen_ticket(
+        tickets_copy,
+        ticket_id,
+        now=now
+    )
+
+    # Record successful reopen event
+    record_event(
+        events_copy,
+        ticket["id"],
+        "REOPEN",
+        actor,
+        "resolved",
+        "open",
+        "Ticket reopened into fresh SLA cycle",
         now=now
     )
 

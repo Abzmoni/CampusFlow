@@ -1,45 +1,44 @@
-# CampusFlow
+# CampusFlow Pro
 
 A Python command-line helpdesk manager for technical support requests across Learn2Earn campus facilities (Wi-Fi outages, faulty hardware, software access, and technical environments).
 
-Built during the **6-Hour Engineering Sprint**.
+Upgraded during the **CampusFlow Pro AI-Native Engineering Challenge** with Service Level Agreements (SLAs), idempotent escalation, append-only audit trails, duplicate ticket warnings, enhanced queues, an interactive Engineering Knowledge Lab, and Version-2 atomic JSON persistence.
 
 ---
 
 ## Engineering Team & Ownership
 
-- **Engineer A (Moses Kingsworth / Moe-Kingsworth)**:
-  - Ticket creation and normalization (`campusflow/tickets.py`).
-  - Strict input validation and atomic state management.
-  - Ordered business priority engine (`calculate_priority`).
-  - JSON persistence and atomic storage operations (`campusflow/storage.py`).
-  - Unit test suite (`tests/test_tickets.py`, `tests/test_storage.py`).
-  - Technical investigation and verification log (`docs/ai-learning-log.md`).
-- **Engineer B (David Abah / Abzmoni)**:
-  - Ticket assignment and lifecycle workflow management (`campusflow/workflow.py`).
-  - Prioritized work queue with numeric ID tie-breakers.
-  - System status and priority summary reports (`campusflow/reports.py`).
-  - Interactive CLI main menu loop (`main.py`).
-  - Workflow unit tests (`tests/test_workflow.py`).
-  - Partner PR code review and technical defense.
+- **Engineer A (David Abah / @Abzmoni)**:
+  - Timezone-aware UTC time handling, clock injection (`now=None`), and ISO-8601 formatting (`campusflow/sla.py`).
+  - SLA due date calculation and strict boundary overdue detection (`calculate_due_at`, `is_overdue`).
+  - Idempotent ticket escalation engine (`escalate_overdue`).
+  - Version-2 JSON schema persistence, validation, and corruption rejection (`campusflow/storage.py`).
+  - Checkpoints A1 through A6 test suites (`tests/test_sla.py`, `tests/test_storage_v2.py`).
+- **Engineer B (Mohammed / @midi2154)**:
+  - Duplicate ticket detection and title normalisation (`campusflow/duplicates.py`).
+  - Append-only event history logging and retrieval (`campusflow/history.py`).
+  - Audited ticket workflow operations (`campusflow/audited_workflow.py`, `campusflow/cli_actions.py`).
+  - SLA Attention Queue and enhanced summary reporting (`campusflow/sla_queue.py`, `campusflow/reports.py`).
+  - Interactive Engineering Knowledge Lab module (`campusflow/knowledge_lab.py`).
+  - Checkpoints B1 through B6 test suites (`tests/test_duplicates.py`, `tests/test_history.py`, `tests/test_audited_workflow.py`, `tests/test_sla_queue.py`, `tests/test_enhanced_reports.py`, `tests/test_knowledge_lab.py`).
 
 ---
 
 ## Quick Start & Setup
 
 ### Requirements
-- Python 3.10+ (tested on Python 3.13)
-- Uses Python standard library only (no external pip dependencies needed)
+- Python 3.10+ (tested on Python 3.12 and 3.13)
+- Uses Python standard library only (no third-party runtime frameworks)
 
 ### Installation
 Clone the repository and enter the directory:
 ```bash
-git clone https://github.com/Moe-Kingsworth/CampusFlow.git
+git clone https://github.com/Abzmoni/CampusFlow.git
 cd CampusFlow
 ```
 
 ### Running Automated Tests
-Run the comprehensive test suite with verbose output:
+Run the entire comprehensive test suite (113+ tests) with verbose output:
 ```bash
 python -m unittest discover -s tests -v
 ```
@@ -51,45 +50,66 @@ python main.py
 ```
 
 Available Menu Options:
-1. **Create Ticket**: Prompts for title, category, urgency, and affected users with priority auto-calculation.
-2. **List / View Tickets**: Lists all tickets and inspects details for any selected ticket ID.
-3. **Assign Ticket**: Assigns an existing ticket to a campus staff member.
-4. **Update Status**: Manages status lifecycle (`open` -> `in_progress` -> `resolved`) or reopens resolved tickets.
-5. **View Work Queue**: Displays open/in-progress tickets ordered by priority and numeric ID tie-breakers.
-6. **Summary Reports**: Displays total counts and status/priority breakdown metrics.
-7. **Exit**: Saves state to `data/tickets.json` and exits.
+1. **Create Ticket (with Duplicate Warning)**: Prompts for title, category, urgency, affected users, and operator label; checks for duplicate open tickets before creation.
+2. **List / View Tickets**: Lists all tickets and inspects details (priority, status, SLA due date, cycle escalation) for any selected ticket ID.
+3. **Assign Ticket to Staff**: Assigns an unresolved ticket to a staff member with an audited `ASSIGN` event.
+4. **Update Ticket Workflow Status**: Progresses tickets (`open` -> `in_progress` -> `resolved`) or reopens resolved tickets into a fresh SLA cycle with audited `START`, `RESOLVE`, and `REOPEN` events.
+5. **View Prioritized Work Queue (Original)**: Displays unresolved tickets ordered by priority and numeric ID tie-breakers.
+6. **View SLA Attention Queue (Pro)**: Displays unresolved tickets sorted by overdue items first, earliest deadline ascending, and numeric ID tie-breakers.
+7. **Check and Escalate Overdue Tickets (Pro)**: Evaluates unresolved tickets against SLA deadlines and records idempotent `ESCALATE` events.
+8. **View Ticket Audit History (Pro)**: Displays the chronological history of state changes and operator actions for any ticket.
+9. **View Summary Reports (Enhanced SLA Analytics)**: Displays totals, status/priority distributions, overdue count, and cycle escalations.
+10. **Engineering Knowledge Lab**: Interactive 10-question quiz with score tracking, revision topics, and written explanation logging.
+11. **Exit**: Atomically persists runtime state to `data/tickets.json` and exits.
 
 ---
 
-## Business Logic & Rules
+## Business Rules & Technical Specifications
 
-### 1. Priority Calculation Engine
-Priority is calculated by evaluating these rules **in strict order** (first match wins):
-1. **Critical**: `urgency == 'high'` **AND** `affected_users >= 10`
-2. **High**: `urgency == 'high'` **OR** `affected_users >= 10`
-3. **Medium**: `urgency == 'medium'` **OR** `affected_users >= 3`
+### 1. Priority Calculation Matrix
+Priority is determined strictly in precedence order:
+1. **Critical**: `urgency == 'high'` AND `affected_users >= 10`
+2. **High**: `urgency == 'high'` OR `affected_users >= 10`
+3. **Medium**: `urgency == 'medium'` OR `affected_users >= 3`
 4. **Low**: All remaining valid tickets
 
-### 2. Validation & Normalization
-- **Title**: Required, non-empty text, whitespace trimmed.
-- **Category**: Allowed values are `Network`, `Hardware`, `Software`, `Other` (case-insensitive input normalized).
-- **Urgency**: Allowed values are `low`, `medium`, `high` (case-insensitive input normalized).
-- **Affected Users**: Must be a strict positive integer (> 0). Booleans, decimals, strings, negative numbers, and zero are strictly rejected.
-- **Ticket ID**: Sequentially generated (`T001`, `T002`, `T003`...) using `max(existing_numeric_ids) + 1` to guarantee uniqueness even across JSON reloads and gapped collections.
+### 2. Service Level Agreements (SLAs) & Overdue Rules
+- **Critical**: 60 minutes
+- **High**: 240 minutes (4 hours)
+- **Medium**: 1440 minutes (24 hours)
+- **Low**: 2880 minutes (48 hours)
+- **Strict Boundary**: A ticket is overdue if and only if `now > due_at` (strict inequality) AND its status is not `resolved`. At the exact `due_at` instant, it is not overdue.
+- **Reopen SLA Cycle**: Reopening a resolved ticket begins a fresh SLA cycle starting at the reopening timestamp, updates `due_at`, preserves `created_at`, and clears the per-cycle escalation flag (`escalation_cycle = 0`).
 
-### 3. Workflow & Lifecycle Transitions
-- Valid states: `open` -> `in_progress` -> `resolved`.
-- An unassigned ticket **cannot** be transitioned to `in_progress`.
-- A `resolved` ticket cannot be modified directly without an explicit reopen operation setting it back to `open`.
+### 3. Escalation Idempotency
+- Running escalation evaluates overdue tickets.
+- If an overdue ticket has `escalation_cycle == 0`, it transitions `escalation_cycle = 1` and creates exactly one `ESCALATE` event.
+- Re-running the command at the same or later time detects `escalation_cycle == 1` and generates zero duplicate events.
+- Escalation does not modify ticket status, priority, or assignment.
 
----
+### 4. Append-Only Audit Trail
+- Successful operations append an immutable event:
+  - Required fields: `event_id` (`E001`, `E002`...), `ticket_id`, `event_type`, `actor`, `timestamp` (ISO-8601 UTC), `before_status`, `after_status`, `details`.
+  - Allowed event types: `CREATE`, `ASSIGN`, `START`, `RESOLVE`, `REOPEN`, `ESCALATE`.
+  - Failure Atomicity: Rejected or invalid operations leave tickets and events completely unchanged.
 
-## Storage & Persistence
+### 5. Duplicate Ticket Detection
+- Compares normalized title (casefold, stripped, collapsed whitespace) and category against unresolved tickets.
+- Warns the operator and presents matching IDs before creation.
+- Confirmed duplicates may be created; declined warnings create neither a ticket nor an event.
 
-- Data is persisted to `data/tickets.json` using atomic file writes (temporary file write followed by replace) to prevent corruption.
-- Missing file triggers a graceful fresh start with an empty ticket queue.
-- Malformed JSON produces a clear `ValueError` rather than silently overwriting corrupted data.
-- To reset state and start completely fresh, simply delete `data/tickets.json`.
+### 6. Storage & Defensive Persistence (Schema Version 2)
+- Saved to `data/tickets.json` with structure:
+  ```json
+  {
+    "schema_version": 2,
+    "tickets": [...],
+    "events": [...]
+  }
+  ```
+- Two-phase validation validates all tickets and events before modifying in-memory state.
+- Atomic writes write to a hidden `.tmp` file and call `os.replace` to prevent partial writes.
+- Malformed JSON raises `ValueError` and leaves active in-memory state intact.
 
 ---
 
@@ -97,44 +117,48 @@ Priority is calculated by evaluating these rules **in strict order** (first matc
 
 ```
 CampusFlow/
-├── README.md                  # Project overview, architecture, and running guide
-├── .gitignore                 # Ignores runtime data, __pycache__, and venv
-├── main.py                    # Interactive CLI application
+├── README.md                           # Project overview, architecture, and manual
+├── .gitignore                          # Ignores runtime data, __pycache__, and venv
+├── main.py                             # Interactive CLI application
 ├── campusflow/
 │   ├── __init__.py
-│   ├── tickets.py             # Ticket creation, validation, priority calculation (Eng A)
-│   ├── storage.py             # JSON load/save persistence engine (Eng A)
-│   ├── workflow.py            # Assignment, status transitions, work queue (Eng B)
-│   └── reports.py             # Metrics and reporting breakdowns (Eng B)
+│   ├── tickets.py                      # Ticket creation and validation
+│   ├── sla.py                          # SLA calculation, boundaries, and escalation
+│   ├── storage.py                      # Version 2 JSON persistence and atomic write
+│   ├── workflow.py                     # Status transitions and priority work queue
+│   ├── duplicates.py                   # Title normalisation and duplicate detection
+│   ├── history.py                      # Append-only audit trail and history retrieval
+│   ├── audited_workflow.py             # Atomic audited ticket operations
+│   ├── cli_actions.py                  # CLI actions with duplicate confirmation
+│   ├── sla_queue.py                    # Time-critical SLA Attention Queue
+│   ├── reports.py                      # Helpdesk analytics and enhanced SLA metrics
+│   └── knowledge_lab.py                # Engineering Knowledge Lab quiz module
 ├── tests/
-│   ├── test_tickets.py        # 14 unit tests for creation and priority (Eng A)
-│   ├── test_storage.py        # 5 unit tests for JSON persistence (Eng A)
-│   └── test_workflow.py       # Workflow, queue, and reporting tests (Eng B)
+│   ├── test_tickets.py                 # Ticket creation & priority tests
+│   ├── test_storage.py                 # Baseline storage tests
+│   ├── test_workflow.py                # Baseline workflow and queue tests
+│   ├── test_sla.py                     # SLA boundaries and escalation tests (A1-A4)
+│   ├── test_storage_v2.py              # Version 2 schema and atomic tests (A5-A6)
+│   ├── test_duplicates.py              # Title normalisation & duplicate guard tests
+│   ├── test_history.py                 # Append-only event recording & history tests
+│   ├── test_audited_workflow.py        # Failure atomicity & audited transition tests
+│   ├── test_cli_actions.py             # Duplicate confirmation and creation tests
+│   ├── test_sla_queue.py               # SLA attention queue sorting tests
+│   ├── test_enhanced_reports.py        # Enhanced reporting and SLA metric tests
+│   ├── test_workflow_pro.py            # Workflow guards and transition lock tests
+│   └── test_knowledge_lab.py           # Knowledge Lab quiz and scoring tests
 └── docs/
-    ├── ai-learning-log.md     # Technical investigation and learning logs with experiments
-    └── design-decisions.md    # Agreed architecture, contracts, and data models
+    ├── ai-learning-log.md              # Engineering learning interactions and experiments
+    ├── design-decisions.md             # Contracts, data shapes, and architectural records
+    └── engineer_a_checkpoints_defense.md # Checkpoints A1-A6 evidence and defense questions
 ```
 
 ---
 
-## Current Verification Status
-- **Integrated Test Suite**: **35 automated tests passing**:
-  - 14 tests in `tests/test_tickets.py` (Required priority scenarios, boundary values, case normalization, atomic creation, sequential & gapped IDs).
-  - 5 tests in `tests/test_storage.py` (Missing file handling, save/load round-trips, malformed JSON detection, atomic saves).
-  - 16 tests in `tests/test_workflow.py` (Assignment, lifecycle progression, resolved ticket reopen locks, priority queue tie-breakers, report aggregations).
+## Verification & Test Suite Health
 
----
-
-## Known Limitations & Future Enhancements
-- **Storage Scope**: CampusFlow stores records in a single local JSON document (`data/tickets.json`), suitable for single-instance campus helpdesk operations. A concurrent multi-terminal setup would benefit from a file lock or database backend.
-- **Search & Filtering**: Ticket inspection is currently keyed by ID. Future work could introduce title/description keyword searching.
-- **Ticket Deletion / Archival**: The current specification does not specify ticket deletion. If deletion is implemented, a persisted high-water mark counter will prevent ID reuse.
-
----
-
-## Pull Requests & Issue Tracking
-
-- **Issue #1**: [Ticket Creation and Priority Engine](https://github.com/Moe-Kingsworth/CampusFlow/issues/1)
-- **Engineer A PR**: Branch `feat/1-ticket-creation` (Moses Kingsworth)
-- **Engineer B PR**: Branch `feat/2-ticket-workflow-reporting` (David Abah)
-- **PR Index**: [GitHub Pull Requests](https://github.com/Moe-Kingsworth/CampusFlow/pulls)
+Run the full suite:
+```bash
+python -m unittest discover tests
+```
+**Current Test Health:** **113 passing tests** across 13 test modules covering all base features, SLA boundaries, escalation idempotency, audit trail invariants, duplicate detection, atomic file persistence, and the Knowledge Lab.
